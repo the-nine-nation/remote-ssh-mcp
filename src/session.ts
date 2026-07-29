@@ -1,7 +1,7 @@
 import { randomBytes } from "node:crypto";
 import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
 import { once } from "node:events";
-import { HeadTailBuffer } from "./output-buffer.js";
+import { HeadTailBuffer, latestLines } from "./output-buffer.js";
 import {
   buildOpenFrame,
   buildRunFrame,
@@ -25,7 +25,7 @@ interface ActiveCommand {
   startedAt: number;
   promise: Promise<CommandResult>;
   resolve: (result: CommandResult) => void;
-  timeoutTimer: NodeJS.Timeout;
+  timeoutTimer?: NodeJS.Timeout;
   graceTimer?: NodeJS.Timeout;
   interruptReason?: "timeout" | "interrupted";
   settled: boolean;
@@ -40,6 +40,8 @@ export type SessionClosedCallback = (
   session: SshSession,
   reason: string,
 ) => void;
+
+export type SessionCreatedCallback = (session: SshSession) => void;
 
 export class SshSession {
   readonly id: string;
@@ -94,6 +96,7 @@ export class SshSession {
     name: string | undefined,
     config: ServerConfig,
     onClosed: SessionClosedCallback,
+    onCreated?: SessionCreatedCallback,
   ): Promise<OpenedSession> {
     const token = randomToken();
     const privateDir = `/tmp/.sshmcp-${randomToken()}`;
@@ -140,6 +143,7 @@ export class SshSession {
       privateDir,
       onClosed,
     );
+    onCreated?.(session);
 
     const ready = new Promise<string | undefined>((resolveReady, rejectReady) => {
       session.#openResolve = resolveReady;
@@ -201,7 +205,11 @@ export class SshSession {
     return summary;
   }
 
-  async run(command: string, timeoutSec: number): Promise<CommandResult> {
+  async run(
+    command: string,
+    timeoutSec?: number,
+    waitSec = 10,
+  ): Promise<CommandResult> {
     this.#touch();
     if (this.#state === "closed") return this.#goneResult();
     if (this.#active) {
@@ -209,7 +217,7 @@ export class SshSession {
         id: this.id,
         status: "busy",
         exit_code: null,
-        ...this.#snapshot(this.#active),
+        ...this.#snapshot(this.#active, 50),
         cwd: this.#cwd,
         duration_ms: Date.now() - this.#active.startedAt,
         message:
@@ -232,12 +240,14 @@ export class SshSession {
       startedAt: Date.now(),
       promise,
       resolve: resolveCommand,
-      timeoutTimer: setTimeout(() => {
-        void this.#requestInterrupt("timeout");
-      }, timeoutSec * 1_000),
       settled: false,
     };
-    active.timeoutTimer.unref();
+    if (timeoutSec !== undefined) {
+      active.timeoutTimer = setTimeout(() => {
+        void this.#requestInterrupt("timeout");
+      }, timeoutSec * 1_000);
+      active.timeoutTimer.unref();
+    }
     this.#active = active;
     this.#state = "running";
     const stderrFile = `${this.#privateDir}/${token}.stderr`;
@@ -252,10 +262,24 @@ export class SshSession {
         }
       },
     );
-    return promise;
+    if (waitSec === 0) return this.#runningResult(active);
+    if (timeoutSec !== undefined && waitSec >= timeoutSec) return promise;
+
+    let waitTimer: NodeJS.Timeout | undefined;
+    const waitExpired = new Promise<CommandResult>((resolveWait) => {
+      waitTimer = setTimeout(() => {
+        resolveWait(this.#runningResult(active));
+      }, waitSec * 1_000);
+      waitTimer.unref();
+    });
+    try {
+      return await Promise.race([promise, waitExpired]);
+    } finally {
+      if (waitTimer) clearTimeout(waitTimer);
+    }
   }
 
-  peek(): Record<string, unknown> {
+  peek(lines = 50): Record<string, unknown> {
     this.#touch();
     if (this.#state === "closed") {
       return {
@@ -268,10 +292,11 @@ export class SshSession {
       return {
         id: this.id,
         status: "running",
-        ...this.#snapshot(this.#active),
+        ...this.#snapshot(this.#active, lines),
         cwd: this.#cwd,
         duration_ms: Date.now() - this.#active.startedAt,
         interrupted: this.#active.interruptReason !== undefined,
+        lines,
       };
     }
     return {
@@ -281,9 +306,12 @@ export class SshSession {
       last_exit: this.#lastExit,
       ...(this.#lastResult
         ? {
-            stdout: this.#lastResult.stdout,
-            stderr: this.#lastResult.stderr,
+            stdout: latestLines(this.#lastResult.stdout, lines),
+            stderr: latestLines(this.#lastResult.stderr, lines),
             truncated: this.#lastResult.truncated,
+            stdout_truncated: this.#lastResult.stdout_truncated,
+            stderr_truncated: this.#lastResult.stderr_truncated,
+            lines,
           }
         : {}),
     };
@@ -418,7 +446,7 @@ export class SshSession {
     if (!active || active.settled) return;
     if (active.interruptReason) return;
     active.interruptReason = reason;
-    clearTimeout(active.timeoutTimer);
+    if (active.timeoutTimer) clearTimeout(active.timeoutTimer);
     this.#child.stdin.write("\x03", (error) => {
       if (error) {
         this.#finishAsDead(`failed to send Ctrl-C: ${error.message}`);
@@ -498,7 +526,7 @@ export class SshSession {
   ): void {
     if (active.settled) return;
     active.settled = true;
-    clearTimeout(active.timeoutTimer);
+    if (active.timeoutTimer) clearTimeout(active.timeoutTimer);
     if (active.graceTimer) clearTimeout(active.graceTimer);
     if (this.#active === active) this.#active = undefined;
     this.#state = keepSession ? "idle" : "closed";
@@ -515,13 +543,14 @@ export class SshSession {
       interrupted?: boolean;
       sessionGone?: boolean;
       message?: string | undefined;
+      lines?: number | undefined;
     },
   ): CommandResult {
     const result: CommandResult = {
       id: this.id,
       status: options.status,
       exit_code: options.exitCode,
-      ...this.#snapshot(active),
+      ...this.#snapshot(active, options.lines),
       cwd: options.cwd ?? this.#cwd,
       duration_ms: Date.now() - active.startedAt,
     };
@@ -535,10 +564,26 @@ export class SshSession {
     return result;
   }
 
-  #snapshot(active: ActiveCommand): OutputSnapshot {
+  #runningResult(active: ActiveCommand): CommandResult {
+    return this.#buildResult(active, {
+      status: "running",
+      exitCode: null,
+      lines: 50,
+      message:
+        "command is still running in this session; do not retry it—poll ssh_peek, use ssh_interrupt to stop it, or open another session for concurrent work",
+    });
+  }
+
+  #snapshot(active: ActiveCommand, lines?: number): OutputSnapshot {
     return {
-      stdout: active.stdout.toString(),
-      stderr: active.stderr.toString(),
+      stdout:
+        lines === undefined
+          ? active.stdout.toString()
+          : latestLines(active.stdout.toString(), lines),
+      stderr:
+        lines === undefined
+          ? active.stderr.toString()
+          : latestLines(active.stderr.toString(), lines),
       truncated: active.stdout.truncated || active.stderr.truncated,
       stdout_truncated: active.stdout.truncated,
       stderr_truncated: active.stderr.truncated,

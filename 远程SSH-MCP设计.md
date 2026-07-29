@@ -113,27 +113,33 @@ MVP 可采用最简单映射：
 {
   "id": "s_a3f2",
   "command": "string",
-  "timeout_sec": "number? // 默认 90；有硬上限"
+  "timeout_sec": "number? // 无默认值；显式传入才启用自动中断",
+  "wait_sec": "number? // 默认 10；本次 MCP 调用等待上限"
 }
 ```
 
 行为：
 
 1. 在该 id 对应的**同一条 shell**中执行 `command`。
-2. 等到命令结束，或达到 `timeout_sec`。
-3. **无论成功、失败还是超时，会话 id 默认保留**（除非 shell 已死，见 §6）。
-4. 返回中始终带上**当前可得的 log**（完整或 partial）以及 `cwd` 等摘要。
+2. 最多同步等待 `wait_sec`；期间命令结束则直接返回最终结果。
+3. `wait_sec` 到期但命令仍在运行时，返回 `status: "running"`，远端命令继续；
+   模型必须用 `ssh_peek` 轮询，不能重试原命令。
+4. 默认不自动中断；只有显式提供 `timeout_sec`，达到该值才中断远端命令。
+5. **无论成功、失败还是超时，会话 id 默认保留**（除非 shell 已死，见 §6）。
+6. 返回中始终带上**当前可得的 log**（完整或 partial）以及 `cwd` 等摘要。
 
 #### `ssh_peek`
 
 ```json
 {
-  "id": "s_a3f2"
+  "id": "s_a3f2",
+  "lines": "number? // 默认 50，最大 1000"
 }
 ```
 
-- 空闲：`status: "idle"`，可附带 last_exit / cwd。
-- 运行中：`status: "running"`，返回目前缓冲的输出尾部（截断）。
+- 空闲：`status: "idle"`，可附带 last_exit / cwd 与上一条命令的最新 N 行。
+- 运行中：`status: "running"`，stdout/stderr 分别返回最新 N 行，按时间从旧到新。
+- `lines` 与底层字节上限同时生效，避免行数或超长单行灌爆模型上下文。
 
 #### `ssh_interrupt`
 
@@ -156,7 +162,10 @@ MVP 可采用最简单映射：
 ### 4.3 工具描述中应写死的约定（影响模型行为）
 
 1. **同一 id 默认续用 cwd 与环境变量；需要干净环境请 `ssh_close` 后重新 `ssh_open`，不要在脏会话里硬猜。**
-2. **不要使用 vim / top / 全交互 TUI；长输出或长任务用合理 `timeout_sec`，卡住时用 `ssh_peek` / `ssh_interrupt`。**
+2. **不要使用 vim / top / 全交互 TUI；长任务使用默认或较短的 `wait_sec`。
+   默认没有自动超时；返回 `running` 表示原命令仍在执行，禁止重试。用
+   `ssh_peek` 轮询，必要时 `ssh_interrupt`；只有确实需要硬截止时间时才传
+   `timeout_sec`。**
 3. **`id` 必须来自 `ssh_open` / `ssh_list` 的返回值，禁止臆造。**
 4. **远程操作优先本 MCP；避免在本机 bash 里再包一层 `ssh`。**
 
@@ -166,12 +175,23 @@ MVP 可采用最简单映射：
 
 | 层级 | 默认（建议） | 说明 |
 |------|----------------|------|
-| 单次命令 `timeout_sec` | **90s** | `ssh_run` 默认；模型可调大 |
-| 单次命令硬上限 | **15–30 min** | 防止 timeout 被设成「无限」 |
+| MCP 调用 `wait_sec` | **10s** | 到期返回 `running`，不停止命令 |
+| 单次命令 `timeout_sec` | **无默认值** | 显式传入才启用自动 Ctrl-C |
+| 显式 timeout 硬上限 | **30 min** | 防止参数被设成「无限」 |
 | 会话 idle 回收 | **15–30 min** 无活动 | 模型忘 close 时的服务端兜底 |
 | 输出截断 | stdout/stderr 各约 **8–32 KiB**：头部 ~4 KiB + 尾部其余 | 防一次响应灌爆模型上下文；保留头部是因为编译/脚本的首条报错往往在开头 |
+| `ssh_peek` 行数 | **最新 50 行/流** | 可调，最大 1000 行，仍受字节上限约束 |
 
 具体数值实现时可配置；上表为产品默认起点。
+
+`wait_sec` 与 `timeout_sec` 必须分离。前者解决 MCP 宿主在 `docker pull`、构建、
+下载或部署期间一直等待的问题；后者是模型主动选择的安全截止时间，不默认启用。
+若 `ssh_run` 返回 `running`，同一 session 仍是 busy 状态，模型应轮询
+`ssh_peek`；需要并发操作时另开 session。
+
+MCP 宿主退出、stdio 断开或父进程消失时，服务端必须关闭全部已建立和正在建立的
+SSH 连接。普通前台进程随 PTY 关闭；明确使用 `nohup`、`setsid`、服务管理器或
+容器脱离会话的工作负载不承诺随 SSH 一起终止。
 
 ### 5.2 超时后行为（关键）
 

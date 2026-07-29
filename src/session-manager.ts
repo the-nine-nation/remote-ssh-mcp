@@ -8,6 +8,7 @@ export class SessionManager {
   readonly #config: ServerConfig;
   readonly #audit: AuditLogger;
   readonly #sessions = new Map<string, SshSession>();
+  readonly #openingSessions = new Set<SshSession>();
   readonly #reaper: NodeJS.Timeout;
   #openingCount = 0;
   #closed = false;
@@ -65,6 +66,7 @@ export class SessionManager {
     this.#openingCount += 1;
     const id = this.#newId();
     const startedAt = Date.now();
+    let openingSession: SshSession | undefined;
     try {
       const opened = await SshSession.open(
         id,
@@ -85,7 +87,12 @@ export class SessionManager {
             });
           }
         },
+        (session) => {
+          openingSession = session;
+          this.#openingSessions.add(session);
+        },
       );
+      this.#openingSessions.delete(opened.session);
       if (opened.session.state === "closed") {
         throw new Error("SSH shell exited during the open handshake");
       }
@@ -130,6 +137,7 @@ export class SessionManager {
         message,
       };
     } finally {
+      if (openingSession) this.#openingSessions.delete(openingSession);
       this.#openingCount -= 1;
     }
   }
@@ -137,7 +145,8 @@ export class SessionManager {
   async run(
     id: string,
     command: string,
-    timeoutSec: number,
+    timeoutSec?: number,
+    waitSec = this.#config.defaultWaitSec,
   ): Promise<Record<string, unknown>> {
     const session = this.#sessions.get(id);
     if (!session) return gone(id);
@@ -160,7 +169,7 @@ export class SessionManager {
       return result;
     }
 
-    const result = await session.run(command, timeoutSec);
+    const result = await session.run(command, timeoutSec, waitSec);
     await this.#audit.write({
       event: "run",
       id,
@@ -175,8 +184,8 @@ export class SessionManager {
     return { ...result };
   }
 
-  peek(id: string): Record<string, unknown> {
-    return this.#sessions.get(id)?.peek() ?? gone(id);
+  peek(id: string, lines = 50): Record<string, unknown> {
+    return this.#sessions.get(id)?.peek(lines) ?? gone(id);
   }
 
   async interrupt(id: string): Promise<Record<string, unknown>> {
@@ -232,9 +241,15 @@ export class SessionManager {
     if (this.#closed) return;
     this.#closed = true;
     clearInterval(this.#reaper);
-    const sessions = [...this.#sessions.values()];
+    const sessions = new Set([
+      ...this.#sessions.values(),
+      ...this.#openingSessions,
+    ]);
     this.#sessions.clear();
-    await Promise.allSettled(sessions.map((session) => session.close("shutdown")));
+    this.#openingSessions.clear();
+    await Promise.allSettled(
+      [...sessions].map((session) => session.close("shutdown")),
+    );
   }
 
   async #reapIdle(): Promise<void> {

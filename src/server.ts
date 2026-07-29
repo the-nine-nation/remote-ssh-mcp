@@ -10,7 +10,7 @@ export function buildServer(manager: SessionManager): McpServer {
   const server = new McpServer(
     {
       name: "remote-ssh-mcp",
-      version: "0.1.0",
+      version: "0.2.0",
     },
     {
       instructions: [
@@ -19,6 +19,9 @@ export function buildServer(manager: SessionManager): McpServer {
         "For a clean environment, close the old session and open a new one.",
         "Do not invent ids; use ids returned by ssh_open or ssh_list.",
         "Avoid interactive TUI programs. Use ssh_peek and ssh_interrupt for a stuck command.",
+        "ssh_run may return running after wait_sec while the remote command continues; do not retry it. Poll ssh_peek, interrupt it, or open another session for concurrent work.",
+        "Commands have no automatic execution timeout unless timeout_sec is explicitly provided; the model owns their lifecycle.",
+        "ssh_peek returns the latest 50 lines per stream by default; request a different bounded line count only when needed.",
         "Prefer these tools over wrapping ssh inside a local shell command.",
       ].join(" "),
     },
@@ -53,7 +56,7 @@ export function buildServer(manager: SessionManager): McpServer {
     {
       title: "Run command in persistent SSH session",
       description:
-        "Run a non-interactive command in the same persistent shell identified by id. cwd and environment changes persist. Only one foreground command may run per id. Timeout sends Ctrl-C and normally keeps the session; if recovery cannot be proven, the session is closed explicitly. Do not use vim, top, password prompts, or other interactive TUI/input flows.",
+        "Start a non-interactive command in the same persistent shell identified by id. cwd and environment changes persist. The call waits at most wait_sec (default 10 seconds); if the command is still active it returns status=running without stopping it. Commands have no automatic execution timeout by default. Only an explicitly provided timeout_sec sends Ctrl-C at that deadline. Never retry a running command: poll ssh_peek, call ssh_interrupt, or open another session for concurrent work. Only one foreground command may run per id. Do not use vim, top, password prompts, or other interactive TUI/input flows.",
       inputSchema: z.object({
         id: z.string().regex(SESSION_ID, "must be an id returned by ssh_open"),
         command: z.string().min(1).max(1024 * 1024),
@@ -61,7 +64,12 @@ export function buildServer(manager: SessionManager): McpServer {
           .number()
           .positive()
           .max(config.maxTimeoutSec)
-          .default(config.defaultTimeoutSec),
+          .optional(),
+        wait_sec: z
+          .number()
+          .nonnegative()
+          .max(config.maxWaitSec)
+          .default(config.defaultWaitSec),
       }),
       annotations: {
         readOnlyHint: false,
@@ -70,8 +78,8 @@ export function buildServer(manager: SessionManager): McpServer {
         openWorldHint: true,
       },
     },
-    async ({ id, command, timeout_sec }) =>
-      toToolResult(await manager.run(id, command, timeout_sec)),
+    async ({ id, command, timeout_sec, wait_sec }) =>
+      toToolResult(await manager.run(id, command, timeout_sec, wait_sec)),
   );
 
   server.registerTool(
@@ -79,9 +87,10 @@ export function buildServer(manager: SessionManager): McpServer {
     {
       title: "Peek at SSH command output",
       description:
-        "Inspect the current foreground command and its truncated output without starting another command. When idle, returns cwd, last exit code, and the previous output snapshot.",
+        "Poll the current foreground command and its latest output without starting another command. Returns the newest lines in chronological order, limited independently for stdout and stderr; lines defaults to 50 and is capped to protect model context. Use after ssh_run returns status=running. When idle, returns cwd, last exit code, and the latest lines from the completed command.",
       inputSchema: z.object({
         id: z.string().regex(SESSION_ID, "must be an id returned by ssh_open"),
+        lines: z.number().int().positive().max(1_000).default(50),
       }),
       annotations: {
         readOnlyHint: true,
@@ -90,7 +99,7 @@ export function buildServer(manager: SessionManager): McpServer {
         openWorldHint: true,
       },
     },
-    ({ id }) => toToolResult(manager.peek(id)),
+    ({ id, lines }) => toToolResult(manager.peek(id, lines)),
   );
 
   server.registerTool(
