@@ -9,8 +9,9 @@ const ConfigFileSchema = z
     allowedHosts: z.array(z.string()).optional(),
     sshConfigPath: z.string().optional(),
     sshPath: z.string().optional(),
-    defaultTimeoutSec: z.number().positive().optional(),
     maxTimeoutSec: z.number().positive().optional(),
+    defaultWaitSec: z.number().nonnegative().optional(),
+    maxWaitSec: z.number().positive().optional(),
     openTimeoutSec: z.number().positive().optional(),
     idleTimeoutSec: z.number().positive().optional(),
     interruptGraceSec: z.number().positive().optional(),
@@ -50,12 +51,16 @@ export async function loadConfig(
     env.SSH_MCP_MAX_TIMEOUT_SEC,
     file.maxTimeoutSec ?? 1_800,
   );
-  const defaultTimeoutSec = Math.min(
-    positiveNumber(
-      env.SSH_MCP_DEFAULT_TIMEOUT_SEC,
-      file.defaultTimeoutSec ?? 90,
+  const maxWaitSec = positiveNumber(
+    env.SSH_MCP_MAX_WAIT_SEC,
+    file.maxWaitSec ?? 30,
+  );
+  const defaultWaitSec = Math.min(
+    nonnegativeNumber(
+      env.SSH_MCP_DEFAULT_WAIT_SEC,
+      file.defaultWaitSec ?? 10,
     ),
-    maxTimeoutSec,
+    maxWaitSec,
   );
   const outputMaxBytes = positiveInteger(
     env.SSH_MCP_OUTPUT_MAX_BYTES,
@@ -76,8 +81,9 @@ export async function loadConfig(
       ...(configuredHosts.length > 0 ? ["explicit configuration"] : []),
     ],
     sshPath: env.SSH_MCP_SSH_PATH ?? file.sshPath ?? "ssh",
-    defaultTimeoutSec,
     maxTimeoutSec,
+    defaultWaitSec,
+    maxWaitSec,
     openTimeoutSec: positiveNumber(
       env.SSH_MCP_OPEN_TIMEOUT_SEC,
       file.openTimeoutSec ?? 20,
@@ -250,6 +256,15 @@ function positiveInteger(value: string | undefined, fallback: number): number {
   const parsed = positiveNumber(value, fallback);
   if (!Number.isInteger(parsed)) {
     throw new Error(`expected a positive integer, got ${JSON.stringify(value)}`);
+  }
+  return parsed;
+}
+
+function nonnegativeNumber(value: string | undefined, fallback: number): number {
+  if (value === undefined) return fallback;
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed) || parsed < 0) {
+    throw new Error(`expected a non-negative number, got ${JSON.stringify(value)}`);
   }
   return parsed;
 }

@@ -39,6 +39,17 @@ test("stdio MCP server lists and calls all six tools", async () => {
         "ssh_run",
       ],
     );
+    const runTool = listed.tools.find((tool) => tool.name === "ssh_run");
+    const peekTool = listed.tools.find((tool) => tool.name === "ssh_peek");
+    assert.equal(runTool?.inputSchema.required?.includes("timeout_sec"), false);
+    assert.equal(
+      (
+        peekTool?.inputSchema.properties?.lines as
+          | { default?: unknown }
+          | undefined
+      )?.default,
+      50,
+    );
     const result = await client.callTool({
       name: "ssh_list",
       arguments: {},

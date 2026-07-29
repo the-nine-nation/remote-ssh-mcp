@@ -1,6 +1,6 @@
 {
   "name": "remote-ssh-mcp",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Persistent, stateful SSH sessions exposed as MCP tools",
   "type": "module",
   "bin": {

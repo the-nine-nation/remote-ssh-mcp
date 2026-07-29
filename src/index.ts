@@ -20,21 +20,82 @@ const handle = serveStdio(() => buildServer(manager), {
   },
 });
 
-let shuttingDown = false;
-async function shutdown(signal: string): Promise<void> {
-  if (shuttingDown) return;
-  shuttingDown = true;
-  console.error(`remote-ssh-mcp: shutting down (${signal})`);
+let shutdownPromise: Promise<void> | undefined;
+const originalParentPid = process.ppid;
+const parentWatch = setInterval(() => {
+  if (originalParentPid !== 1 && process.ppid === 1) {
+    beginShutdown("parent process exited");
+  }
+}, 1_000);
+parentWatch.unref();
+
+async function shutdown(reason: string): Promise<void> {
+  clearInterval(parentWatch);
+  console.error(`remote-ssh-mcp: shutting down (${reason})`);
   await manager.closeAll();
-  await handle.close();
+  try {
+    await handle.close();
+  } catch (error) {
+    console.error(
+      `remote-ssh-mcp: transport close failed: ${
+        error instanceof Error ? error.message : String(error)
+      }`,
+    );
+  }
+}
+
+function beginShutdown(reason: string, exitCode = 0): void {
+  if (shutdownPromise) return;
+  shutdownPromise = shutdown(reason);
+  void shutdownPromise.then(
+    () => process.exit(exitCode),
+    (error) => {
+      console.error(
+        `remote-ssh-mcp: shutdown failed: ${
+          error instanceof Error ? error.message : String(error)
+        }`,
+      );
+      process.exit(1);
+    },
+  );
 }
 
 process.once("SIGINT", () => {
-  void shutdown("SIGINT").finally(() => process.exit(0));
+  beginShutdown("SIGINT");
 });
 process.once("SIGTERM", () => {
-  void shutdown("SIGTERM").finally(() => process.exit(0));
+  beginShutdown("SIGTERM");
+});
+process.once("SIGHUP", () => {
+  beginShutdown("SIGHUP");
 });
 process.stdin.once("end", () => {
-  void shutdown("stdin EOF").finally(() => process.exit(0));
+  beginShutdown("stdin EOF");
+});
+process.stdin.once("close", () => {
+  beginShutdown("stdin closed");
+});
+process.stdin.once("error", (error) => {
+  beginShutdown(`stdin error: ${error.message}`, 1);
+});
+process.stdout.once("error", (error: NodeJS.ErrnoException) => {
+  beginShutdown(
+    error.code === "EPIPE" ? "MCP output pipe closed" : `stdout error: ${error.message}`,
+    error.code === "EPIPE" ? 0 : 1,
+  );
+});
+process.once("disconnect", () => {
+  beginShutdown("parent IPC disconnected");
+});
+process.once("uncaughtException", (error) => {
+  console.error(`remote-ssh-mcp: uncaught exception: ${error.stack ?? error.message}`);
+  beginShutdown("uncaught exception", 1);
+});
+process.once("unhandledRejection", (reason) => {
+  console.error(
+    `remote-ssh-mcp: unhandled rejection: ${
+      reason instanceof Error ? reason.stack ?? reason.message : String(reason)
+    }`,
+  );
+  beginShutdown("unhandled rejection", 1);
 });

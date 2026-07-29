@@ -60,6 +60,16 @@ export class HeadTailBuffer {
   }
 }
 
+export function latestLines(input: string, count: number): string {
+  if (count <= 0 || input.length === 0) return "";
+  const normalized = input.replace(/\r\n/g, "\n").replace(/\r/g, "\n");
+  const hasTrailingNewline = normalized.endsWith("\n");
+  const lines = normalized.split("\n");
+  if (hasTrailingNewline) lines.pop();
+  const result = lines.slice(-count).join("\n");
+  return hasTrailingNewline && result.length > 0 ? `${result}\n` : result;
+}
+
 function trimUtf8ContinuationStart(buffer: Buffer): Buffer {
   let start = 0;
   while (

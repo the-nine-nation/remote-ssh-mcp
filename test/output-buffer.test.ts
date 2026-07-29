@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { HeadTailBuffer } from "../src/output-buffer.js";
+import { HeadTailBuffer, latestLines } from "../src/output-buffer.js";
 
 test("HeadTailBuffer retains complete output below the limit", () => {
   const output = new HeadTailBuffer(16, 4);
@@ -23,4 +23,9 @@ test("HeadTailBuffer never emits malformed UTF-8 at a truncation edge", () => {
   output.append("甲乙丙丁");
   assert.equal(output.truncated, true);
   assert.equal(output.toString().includes("�"), false);
+});
+
+test("latestLines returns newest lines and handles terminal carriage returns", () => {
+  assert.equal(latestLines("one\ntwo\nthree\n", 2), "two\nthree\n");
+  assert.equal(latestLines("step 1\rstep 2\rstep 3", 2), "step 2\nstep 3");
 });

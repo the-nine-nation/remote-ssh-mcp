@@ -42,4 +42,6 @@ test("config discovers exact ssh aliases through Include and ignores patterns", 
   ]);
   assert.equal(config.allowedHosts.has("*.example"), false);
   assert.equal(config.allowedHosts.has("blocked"), false);
+  assert.equal(config.defaultWaitSec, 10);
+  assert.equal(config.maxWaitSec, 30);
 });

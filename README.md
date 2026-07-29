@@ -30,7 +30,7 @@ ssh_close(id) → release the shell and connection
 - Persistent remote Bash sessions with stable IDs
 - Working-directory and environment persistence within each session
 - Separate `stdout` and `stderr` in tool results
-- Configurable command timeouts with Ctrl-C recovery
+- Non-blocking observation of long commands with a separate hard timeout
 - Safe fail-closed behavior when shell recovery cannot be confirmed
 - Head-and-tail output truncation with valid UTF-8 boundaries
 - Exact SSH Host alias allowlist from `ssh_config` and explicit configuration
@@ -44,7 +44,7 @@ ssh_close(id) → release the shell and connection
 |---|---|
 | `ssh_open` | Open a clean persistent shell for an allowed SSH Host alias |
 | `ssh_run` | Run a non-interactive command in an existing session |
-| `ssh_peek` | Inspect current status and buffered output |
+| `ssh_peek` | Inspect status and the latest N output lines (default 50) |
 | `ssh_interrupt` | Send Ctrl-C and wait for confirmed shell recovery |
 | `ssh_list` | List sessions, cwd, state, idle countdown, and capacity |
 | `ssh_close` | Clean up and close a session |
@@ -120,8 +120,9 @@ Example:
   "allowedHosts": ["prod", "staging"],
   "sshConfigPath": "~/.ssh/config",
   "sshPath": "ssh",
-  "defaultTimeoutSec": 90,
   "maxTimeoutSec": 1800,
+  "defaultWaitSec": 10,
+  "maxWaitSec": 30,
   "openTimeoutSec": 20,
   "idleTimeoutSec": 1800,
   "interruptGraceSec": 5,
@@ -140,8 +141,9 @@ Environment variables override file settings:
 | `SSH_MCP_ALLOWED_HOSTS` | Comma-separated additional Host aliases |
 | `SSH_MCP_SSH_CONFIG` | SSH config path |
 | `SSH_MCP_SSH_PATH` | OpenSSH executable |
-| `SSH_MCP_DEFAULT_TIMEOUT_SEC` | Default command timeout |
-| `SSH_MCP_MAX_TIMEOUT_SEC` | Hard command-timeout limit |
+| `SSH_MCP_MAX_TIMEOUT_SEC` | Maximum explicitly requested command timeout |
+| `SSH_MCP_DEFAULT_WAIT_SEC` | How long `ssh_run` waits before returning `running` |
+| `SSH_MCP_MAX_WAIT_SEC` | Maximum permitted `wait_sec` |
 | `SSH_MCP_OPEN_TIMEOUT_SEC` | Connection and handshake timeout |
 | `SSH_MCP_IDLE_TIMEOUT_SEC` | Idle session lifetime |
 | `SSH_MCP_INTERRUPT_GRACE_SEC` | Marker recovery grace period after Ctrl-C |
@@ -158,6 +160,16 @@ arguments are intentionally omitted to reduce the chance of logging secrets.
 
 - One session accepts only one foreground command at a time. Concurrent
   `ssh_run` calls return `busy` instead of being queued.
+- `wait_sec` limits only how long the MCP call waits. If it expires,
+  `ssh_run` returns `status: "running"` while the remote command continues.
+  Do not start the command again. Poll `ssh_peek`, stop it with
+  `ssh_interrupt`, or open another session for concurrent work.
+- Commands have no automatic execution timeout by default. The model owns
+  their lifecycle. Only an explicitly supplied `timeout_sec` creates a hard
+  deadline that sends Ctrl-C.
+- `ssh_peek` returns the newest 50 lines from stdout and stderr by default.
+  Pass `lines` (maximum 1,000) when a different tail length is needed. Byte
+  limits still apply, so a very long individual line remains bounded.
 - User-command stdin is `/dev/null`. Do not run `vim`, `top`, interactive
   installers, or other TUI/input-driven programs.
 - A timeout sends Ctrl-C. If a complete protocol marker arrives during the
@@ -169,6 +181,16 @@ arguments are intentionally omitted to reduce the chance of logging secrets.
   is not a complete policy engine.
 - This project targets a trusted local developer environment. It is not a
   multi-tenant remote execution service.
+- If the MCP host exits or its stdio/parent connection disappears, the server
+  closes every tracked SSH connection, including connections still opening.
+  Normal foreground processes end with their PTY; deliberately detached
+  processes such as `nohup`, `setsid`, services, and containers may continue.
+
+For example, start a `docker pull` with `wait_sec: 10` and omit
+`timeout_sec`. A `running` result means the original pull remains active—not
+that it should be retried. Call `ssh_peek` with the same session ID until it
+becomes `idle`, interrupt it explicitly, or open another session for parallel
+work.
 
 ## Development
 

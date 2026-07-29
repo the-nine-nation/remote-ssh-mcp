@@ -2,6 +2,7 @@ export type SessionState = "idle" | "running" | "closed";
 
 export type CommandStatus =
   | "ok"
+  | "running"
   | "command_failed"
   | "timeout"
   | "interrupted"
@@ -45,8 +46,9 @@ export interface ServerConfig {
   allowedHosts: ReadonlySet<string>;
   allowedHostsSource: string[];
   sshPath: string;
-  defaultTimeoutSec: number;
   maxTimeoutSec: number;
+  defaultWaitSec: number;
+  maxWaitSec: number;
   openTimeoutSec: number;
   idleTimeoutSec: number;
   interruptGraceSec: number;
