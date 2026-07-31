@@ -50,6 +50,14 @@ test("stdio MCP server lists and calls all six tools", async () => {
       )?.default,
       50,
     );
+    assert.equal(
+      (
+        peekTool?.inputSchema.properties?.wait_sec as
+          | { default?: unknown }
+          | undefined
+      )?.default,
+      0,
+    );
     const result = await client.callTool({
       name: "ssh_list",
       arguments: {},

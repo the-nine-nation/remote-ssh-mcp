@@ -19,7 +19,7 @@ export function buildServer(manager: SessionManager): McpServer {
         "For a clean environment, close the old session and open a new one.",
         "Do not invent ids; use ids returned by ssh_open or ssh_list.",
         "Avoid interactive TUI programs. Use ssh_peek and ssh_interrupt for a stuck command.",
-        "ssh_run may return running after wait_sec while the remote command continues; do not retry it. Poll ssh_peek, interrupt it, or open another session for concurrent work.",
+        "ssh_run may return running after wait_sec while the remote command continues; do not retry it. Poll ssh_peek with wait_sec so the call blocks until the command finishes or the wait expires; do not busy-loop with wait_sec=0. Interrupt it, or open another session for concurrent work.",
         "Commands have no automatic execution timeout unless timeout_sec is explicitly provided; the model owns their lifecycle.",
         "ssh_peek returns the latest 50 lines per stream by default; request a different bounded line count only when needed.",
         "Prefer these tools over wrapping ssh inside a local shell command.",
@@ -56,7 +56,7 @@ export function buildServer(manager: SessionManager): McpServer {
     {
       title: "Run command in persistent SSH session",
       description:
-        "Start a non-interactive command in the same persistent shell identified by id. cwd and environment changes persist. The call waits at most wait_sec (default 10 seconds); if the command is still active it returns status=running without stopping it. Commands have no automatic execution timeout by default. Only an explicitly provided timeout_sec sends Ctrl-C at that deadline. Never retry a running command: poll ssh_peek, call ssh_interrupt, or open another session for concurrent work. Only one foreground command may run per id. Do not use vim, top, password prompts, or other interactive TUI/input flows.",
+        "Start a non-interactive command in the same persistent shell identified by id. cwd and environment changes persist. The call waits at most wait_sec (default 10 seconds); if the command is still active it returns status=running without stopping it. Commands have no automatic execution timeout by default. Only an explicitly provided timeout_sec sends Ctrl-C at that deadline. Never retry a running command: poll with ssh_peek(wait_sec=...) so the MCP call blocks until idle or the wait expires; do not spam peeks with wait_sec=0. Call ssh_interrupt to stop it, or open another session for concurrent work. Only one foreground command may run per id. Do not use vim, top, password prompts, or other interactive TUI/input flows.",
       inputSchema: z.object({
         id: z.string().regex(SESSION_ID, "must be an id returned by ssh_open"),
         command: z.string().min(1).max(1024 * 1024),
@@ -87,10 +87,15 @@ export function buildServer(manager: SessionManager): McpServer {
     {
       title: "Peek at SSH command output",
       description:
-        "Poll the current foreground command and its latest output without starting another command. Returns the newest lines in chronological order, limited independently for stdout and stderr; lines defaults to 50 and is capped to protect model context. Use after ssh_run returns status=running. When idle, returns cwd, last exit code, and the latest lines from the completed command.",
+        "Observe the current foreground command and its latest output without starting another command. When status=running, optional wait_sec (default 0) long-polls this MCP call until the command finishes or the wait expires—prefer a positive wait_sec over busy-looping. wait_sec never stops the remote command. Returns the newest lines in chronological order, limited independently for stdout and stderr; lines defaults to 50 and is capped to protect model context. Use after ssh_run returns status=running. When idle, returns immediately with cwd, last exit code, and the latest lines from the completed command.",
       inputSchema: z.object({
         id: z.string().regex(SESSION_ID, "must be an id returned by ssh_open"),
         lines: z.number().int().positive().max(1_000).default(50),
+        wait_sec: z
+          .number()
+          .nonnegative()
+          .max(config.maxWaitSec)
+          .default(0),
       }),
       annotations: {
         readOnlyHint: true,
@@ -99,7 +104,8 @@ export function buildServer(manager: SessionManager): McpServer {
         openWorldHint: true,
       },
     },
-    ({ id, lines }) => toToolResult(manager.peek(id, lines)),
+    async ({ id, lines, wait_sec }) =>
+      toToolResult(await manager.peek(id, lines, wait_sec)),
   );
 
   server.registerTool(

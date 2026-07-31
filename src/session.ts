@@ -279,7 +279,32 @@ export class SshSession {
     }
   }
 
-  peek(lines = 50): Record<string, unknown> {
+  async peek(lines = 50, waitSec = 0): Promise<Record<string, unknown>> {
+    this.#touch();
+
+    // Long-poll while a foreground command is active so the model does not
+    // busy-loop with immediate peeks. Idle sessions return immediately.
+    const active = this.#active;
+    if (active && waitSec > 0) {
+      let waitTimer: NodeJS.Timeout | undefined;
+      const waitExpired = new Promise<"expired">((resolve) => {
+        waitTimer = setTimeout(() => resolve("expired"), waitSec * 1_000);
+        waitTimer.unref();
+      });
+      try {
+        await Promise.race([
+          active.promise.then(() => "done" as const),
+          waitExpired,
+        ]);
+      } finally {
+        if (waitTimer) clearTimeout(waitTimer);
+      }
+    }
+
+    return this.#peekSnapshot(lines);
+  }
+
+  #peekSnapshot(lines: number): Record<string, unknown> {
     this.#touch();
     if (this.#state === "closed") {
       return {

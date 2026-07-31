@@ -9,7 +9,7 @@
 
 - `ssh_open`：为允许的 SSH Host 别名新建持久 session
 - `ssh_run`：在同一远程 Bash 中执行非交互命令
-- `ssh_peek`：查看运行状态和最新 N 行输出，默认 50 行
+- `ssh_peek`：查看运行状态和最新 N 行输出，默认 50 行；可选 `wait_sec` 在运行中长轮询
 - `ssh_interrupt`：发送 Ctrl-C；只有确认协议恢复才保留 session
 - `ssh_list`：列出存活 session、cwd、idle 回收倒计时与连接水位
 - `ssh_close`：清理远程临时目录并释放 SSH 连接
@@ -108,7 +108,7 @@ allowlist。工具参数只接受安全别名，不接受 `user@host`、端口�
 | `SSH_MCP_SSH_PATH` | OpenSSH 可执行文件 |
 | `SSH_MCP_MAX_TIMEOUT_SEC` | 显式 `timeout_sec` 的允许上限 |
 | `SSH_MCP_DEFAULT_WAIT_SEC` | `ssh_run` 返回 `running` 前的默认等待时间 |
-| `SSH_MCP_MAX_WAIT_SEC` | `wait_sec` 的允许上限 |
+| `SSH_MCP_MAX_WAIT_SEC` | `ssh_run` / `ssh_peek` 的 `wait_sec` 允许上限 |
 | `SSH_MCP_OPEN_TIMEOUT_SEC` | 建连/握手超时 |
 | `SSH_MCP_IDLE_TIMEOUT_SEC` | idle 自动回收时间 |
 | `SSH_MCP_INTERRUPT_GRACE_SEC` | Ctrl-C 后等待 marker 的宽限期 |
@@ -124,12 +124,14 @@ SHA-256；不记录完整命令参数，避免凭证进入日志。
 
 - 同一 id 同时只运行一个前台命令；再次 `ssh_run` 返回 `busy`。
 - `wait_sec` 到期只会让 MCP 调用返回 `running`，不会停止远端命令。不要重试
-  原命令；应使用相同 id 调用 `ssh_peek` 轮询，必要时 `ssh_interrupt`，并发工作
-  则另开 session。
+  原命令；应使用相同 id 调用 `ssh_peek` 并传入 `wait_sec` 做长轮询（不要用
+  `wait_sec: 0` 空转），必要时 `ssh_interrupt`，并发工作则另开 session。
 - 默认没有执行超时，一切由模型管理。只有显式传入 `timeout_sec` 才会在到期后
   自动 Ctrl-C；`docker pull` 等长任务通常只需设置或沿用 `wait_sec: 10`。
 - `ssh_peek` 的 `lines` 默认 50、最大 1000，stdout 和 stderr 分别返回最新 N 行，
   顺序仍为从旧到新；底层字节上限继续生效，防止单行日志过大。
+  可选 `wait_sec`（默认 0，受 `maxWaitSec` 限制）：命令运行中会阻塞到结束或
+  等待到期，空闲时立即返回。
 - 用户命令的 stdin 固定为 `/dev/null`。不要运行 `vim`、`top`、交互安装器等。
 - 超时会发送 Ctrl-C。宽限期内收到完整 marker，session 回到 idle；否则关闭
   session，防止未知前台进程污染下一条命令。

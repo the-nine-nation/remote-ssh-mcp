@@ -44,7 +44,7 @@ ssh_close(id) → release the shell and connection
 |---|---|
 | `ssh_open` | Open a clean persistent shell for an allowed SSH Host alias |
 | `ssh_run` | Run a non-interactive command in an existing session |
-| `ssh_peek` | Inspect status and the latest N output lines (default 50) |
+| `ssh_peek` | Inspect status and the latest N output lines; optional `wait_sec` long-polls while running |
 | `ssh_interrupt` | Send Ctrl-C and wait for confirmed shell recovery |
 | `ssh_list` | List sessions, cwd, state, idle countdown, and capacity |
 | `ssh_close` | Clean up and close a session |
@@ -143,7 +143,7 @@ Environment variables override file settings:
 | `SSH_MCP_SSH_PATH` | OpenSSH executable |
 | `SSH_MCP_MAX_TIMEOUT_SEC` | Maximum explicitly requested command timeout |
 | `SSH_MCP_DEFAULT_WAIT_SEC` | How long `ssh_run` waits before returning `running` |
-| `SSH_MCP_MAX_WAIT_SEC` | Maximum permitted `wait_sec` |
+| `SSH_MCP_MAX_WAIT_SEC` | Maximum permitted `wait_sec` on `ssh_run` and `ssh_peek` |
 | `SSH_MCP_OPEN_TIMEOUT_SEC` | Connection and handshake timeout |
 | `SSH_MCP_IDLE_TIMEOUT_SEC` | Idle session lifetime |
 | `SSH_MCP_INTERRUPT_GRACE_SEC` | Marker recovery grace period after Ctrl-C |
@@ -162,14 +162,18 @@ arguments are intentionally omitted to reduce the chance of logging secrets.
   `ssh_run` calls return `busy` instead of being queued.
 - `wait_sec` limits only how long the MCP call waits. If it expires,
   `ssh_run` returns `status: "running"` while the remote command continues.
-  Do not start the command again. Poll `ssh_peek`, stop it with
-  `ssh_interrupt`, or open another session for concurrent work.
+  Do not start the command again. Poll with `ssh_peek(wait_sec=...)` so the
+  call blocks until the command finishes or the wait expires; do not busy-loop
+  with `wait_sec: 0`. Stop it with `ssh_interrupt`, or open another session
+  for concurrent work.
 - Commands have no automatic execution timeout by default. The model owns
   their lifecycle. Only an explicitly supplied `timeout_sec` creates a hard
   deadline that sends Ctrl-C.
 - `ssh_peek` returns the newest 50 lines from stdout and stderr by default.
   Pass `lines` (maximum 1,000) when a different tail length is needed. Byte
   limits still apply, so a very long individual line remains bounded.
+  Optional `wait_sec` (default 0, capped by `maxWaitSec`) long-polls while the
+  session is running and returns immediately when idle.
 - User-command stdin is `/dev/null`. Do not run `vim`, `top`, interactive
   installers, or other TUI/input-driven programs.
 - A timeout sends Ctrl-C. If a complete protocol marker arrives during the
@@ -188,9 +192,9 @@ arguments are intentionally omitted to reduce the chance of logging secrets.
 
 For example, start a `docker pull` with `wait_sec: 10` and omit
 `timeout_sec`. A `running` result means the original pull remains active—not
-that it should be retried. Call `ssh_peek` with the same session ID until it
-becomes `idle`, interrupt it explicitly, or open another session for parallel
-work.
+that it should be retried. Call `ssh_peek` with the same session ID and a
+positive `wait_sec` until it becomes `idle`, interrupt it explicitly, or open
+another session for parallel work.
 
 ## Development
 

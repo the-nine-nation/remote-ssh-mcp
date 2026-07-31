@@ -133,12 +133,15 @@ MVP 可采用最简单映射：
 ```json
 {
   "id": "s_a3f2",
-  "lines": "number? // 默认 50，最大 1000"
+  "lines": "number? // 默认 50，最大 1000",
+  "wait_sec": "number? // 默认 0；运行中最长阻塞等待，到期仍 running；不停止远端命令"
 }
 ```
 
-- 空闲：`status: "idle"`，可附带 last_exit / cwd 与上一条命令的最新 N 行。
-- 运行中：`status: "running"`，stdout/stderr 分别返回最新 N 行，按时间从旧到新。
+- 空闲：立即返回 `status: "idle"`，可附带 last_exit / cwd 与上一条命令的最新 N 行。
+- 运行中：若 `wait_sec > 0`，阻塞到命令结束或等待到期；到期仍 `status: "running"`。
+  stdout/stderr 分别返回最新 N 行，按时间从旧到新。
+- 模型应优先带 `wait_sec` 长轮询，避免 `wait_sec: 0` 空转。
 - `lines` 与底层字节上限同时生效，避免行数或超长单行灌爆模型上下文。
 
 #### `ssh_interrupt`
@@ -164,8 +167,8 @@ MVP 可采用最简单映射：
 1. **同一 id 默认续用 cwd 与环境变量；需要干净环境请 `ssh_close` 后重新 `ssh_open`，不要在脏会话里硬猜。**
 2. **不要使用 vim / top / 全交互 TUI；长任务使用默认或较短的 `wait_sec`。
    默认没有自动超时；返回 `running` 表示原命令仍在执行，禁止重试。用
-   `ssh_peek` 轮询，必要时 `ssh_interrupt`；只有确实需要硬截止时间时才传
-   `timeout_sec`。**
+   `ssh_peek(wait_sec=...)` 长轮询（禁止 `wait_sec: 0` 空转），必要时
+   `ssh_interrupt`；只有确实需要硬截止时间时才传 `timeout_sec`。**
 3. **`id` 必须来自 `ssh_open` / `ssh_list` 的返回值，禁止臆造。**
 4. **远程操作优先本 MCP；避免在本机 bash 里再包一层 `ssh`。**
 
@@ -186,7 +189,7 @@ MVP 可采用最简单映射：
 
 `wait_sec` 与 `timeout_sec` 必须分离。前者解决 MCP 宿主在 `docker pull`、构建、
 下载或部署期间一直等待的问题；后者是模型主动选择的安全截止时间，不默认启用。
-若 `ssh_run` 返回 `running`，同一 session 仍是 busy 状态，模型应轮询
+若 `ssh_run` 返回 `running`，同一 session 仍是 busy 状态，模型应带 `wait_sec` 长轮询
 `ssh_peek`；需要并发操作时另开 session。
 
 MCP 宿主退出、stdio 断开或父进程消失时，服务端必须关闭全部已建立和正在建立的

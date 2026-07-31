@@ -63,6 +63,7 @@ test("persistent session preserves cwd/env and separates output", async (t) => {
   assert.equal(closed.status, "closed");
   assert.equal((await manager.peek(id)).status, "session_gone");
 
+
   const audit = await readFile(auditLogPath, "utf8");
   assert.match(audit, /"event":"open"/);
   assert.match(audit, /"command_sha256":/);
@@ -79,7 +80,7 @@ test("same-session concurrency returns busy without queueing", async (t) => {
   await new Promise((resolveWait) => setTimeout(resolveWait, 30));
 
   assert.equal((await manager.run(id, "printf nope", 1)).status, "busy");
-  assert.equal(manager.peek(id).status, "running");
+  assert.equal((await manager.peek(id)).status, "running");
   await manager.close(id);
   assert.equal((await running).status, "shell_dead");
 });
@@ -98,13 +99,57 @@ test("wait expiry returns running while the command continues", async (t) => {
   );
   assert.equal(initial.status, "running");
   assert.equal(initial.exit_code, null);
-  assert.equal(manager.peek(id).status, "running");
+  assert.equal((await manager.peek(id)).status, "running");
 
   await new Promise((resolveWait) => setTimeout(resolveWait, 200));
-  const completed = manager.peek(id);
+  const completed = await manager.peek(id);
   assert.equal(completed.status, "idle");
   assert.equal(completed.last_exit, 0);
   assert.equal(completed.stdout, "finished");
+});
+
+test("peek wait_sec long-polls until the command finishes", async (t) => {
+  const { manager } = await fixture();
+  t.after(() => manager.closeAll());
+  const opened = await manager.open("test");
+  const id = opened.id as string;
+
+  const initial = await manager.run(
+    id,
+    "sleep 0.12; printf done",
+    undefined,
+    0.02,
+  );
+  assert.equal(initial.status, "running");
+
+  const started = Date.now();
+  const completed = await manager.peek(id, 50, 1);
+  const elapsed = Date.now() - started;
+  assert.equal(completed.status, "idle");
+  assert.equal(completed.stdout, "done");
+  assert.ok(elapsed >= 80, `expected to wait for completion, elapsed=${elapsed}`);
+  assert.ok(elapsed < 900, `should return soon after completion, elapsed=${elapsed}`);
+});
+
+test("peek wait_sec expiry leaves the command running", async (t) => {
+  const { manager } = await fixture();
+  t.after(() => manager.closeAll());
+  const opened = await manager.open("test");
+  const id = opened.id as string;
+
+  const initial = await manager.run(id, "sleep 1; printf late", undefined, 0.02);
+  assert.equal(initial.status, "running");
+
+  const started = Date.now();
+  const peeking = await manager.peek(id, 50, 0.05);
+  const elapsed = Date.now() - started;
+  assert.equal(peeking.status, "running");
+  assert.ok(elapsed >= 40, `expected wait_sec to block, elapsed=${elapsed}`);
+  assert.ok(elapsed < 400, `should not wait for the full command, elapsed=${elapsed}`);
+
+  const finished = await manager.peek(id, 50, 1);
+  assert.equal(finished.status, "idle");
+  assert.equal(finished.stdout, "late");
 });
 
 test("peek returns the latest 50 lines by default and accepts a smaller limit", async (t) => {
@@ -121,12 +166,12 @@ test("peek returns the latest 50 lines by default and accepts a smaller limit", 
   );
   assert.equal(result.status, "ok");
 
-  const defaultView = manager.peek(id);
+  const defaultView = await manager.peek(id);
   assert.match(defaultView.stdout as string, /^line31\n/);
   assert.match(defaultView.stdout as string, /line80\n$/);
   assert.equal((defaultView.stdout as string).includes("line30\n"), false);
 
-  assert.equal(manager.peek(id, 3).stdout, "line78\nline79\nline80\n");
+  assert.equal((await manager.peek(id, 3)).stdout, "line78\nline79\nline80\n");
 });
 
 test("unrecoverable timeout closes the session instead of claiming idle", async (t) => {
@@ -138,7 +183,7 @@ test("unrecoverable timeout closes the session instead of claiming idle", async 
 
   assert.equal(result.status, "timeout");
   assert.equal(result.session_gone, true);
-  assert.equal(manager.peek(id).status, "session_gone");
+  assert.equal((await manager.peek(id)).status, "session_gone");
 });
 
 test("a command that kills the shell returns shell_dead and invalidates the id", async (t) => {
@@ -150,7 +195,7 @@ test("a command that kills the shell returns shell_dead and invalidates the id",
 
   assert.equal(result.status, "shell_dead");
   assert.equal(result.session_gone, true);
-  assert.equal(manager.peek(id).status, "session_gone");
+  assert.equal((await manager.peek(id)).status, "session_gone");
 });
 
 test("host allowlist and command denylist fail closed", async (t) => {

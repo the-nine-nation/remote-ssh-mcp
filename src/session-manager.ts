@@ -184,8 +184,14 @@ export class SessionManager {
     return { ...result };
   }
 
-  peek(id: string, lines = 50): Record<string, unknown> {
-    return this.#sessions.get(id)?.peek(lines) ?? gone(id);
+  async peek(
+    id: string,
+    lines = 50,
+    waitSec = 0,
+  ): Promise<Record<string, unknown>> {
+    const session = this.#sessions.get(id);
+    if (!session) return gone(id);
+    return session.peek(lines, waitSec);
   }
 
   async interrupt(id: string): Promise<Record<string, unknown>> {
