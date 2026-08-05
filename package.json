@@ -1,7 +1,7 @@
 {
   "name": "remote-ssh-mcp",
   "version": "0.2.0",
-  "description": "Persistent, stateful SSH sessions exposed as MCP tools",
+  "description": "Persistent, stateful remote SSH sessions for AI agents via Model Context Protocol (MCP)",
   "type": "module",
   "bin": {
     "remote-ssh-mcp": "./dist/index.js"
@@ -18,11 +18,38 @@
     "dev": "tsx src/index.ts",
     "start": "node dist/index.js",
     "test": "node --import tsx --test test/*.test.ts",
-    "typecheck": "tsc -p tsconfig.json --noEmit"
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "prepublishOnly": "npm run build && npm test"
   },
   "engines": {
     "node": ">=20"
   },
+  "keywords": [
+    "mcp",
+    "model-context-protocol",
+    "mcp-server",
+    "ssh",
+    "remote-ssh",
+    "openssh",
+    "ai-agents",
+    "llm",
+    "claude",
+    "cursor",
+    "devops",
+    "bash",
+    "terminal",
+    "remote-execution",
+    "typescript"
+  ],
+  "author": "the-nine-nation",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/the-nine-nation/remote-ssh-mcp.git"
+  },
+  "bugs": {
+    "url": "https://github.com/the-nine-nation/remote-ssh-mcp/issues"
+  },
+  "homepage": "https://github.com/the-nine-nation/remote-ssh-mcp#readme",
   "dependencies": {
     "@modelcontextprotocol/server": "^2.0.0",
     "zod": "^4.4.3"
@@ -35,3 +62,4 @@
   },
   "license": "MIT"
 }
+
