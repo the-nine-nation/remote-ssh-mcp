@@ -42,9 +42,27 @@ export interface SessionSummary {
   last_exit: number | null;
 }
 
+/** Safe Host metadata exposed to agents. Never includes key/credential paths. */
+export type HostSource = "ssh_config" | "explicit";
+
+export interface HostCatalogEntry {
+  readonly alias: string;
+  readonly hostname?: string;
+  readonly user?: string;
+  readonly port?: number;
+  readonly proxy_jump?: string;
+  readonly sources: readonly HostSource[];
+}
+
 export interface ServerConfig {
   allowedHosts: ReadonlySet<string>;
+  hosts: readonly HostCatalogEntry[];
   allowedHostsSource: string[];
+  /** Absolute path used for discovery and ssh_hosts reload. */
+  sshConfigPath: string;
+  /** Explicit aliases from config file + SSH_MCP_ALLOWED_HOSTS (for reload). */
+  explicitHosts: readonly string[];
+  home: string;
   sshPath: string;
   maxTimeoutSec: number;
   defaultWaitSec: number;
