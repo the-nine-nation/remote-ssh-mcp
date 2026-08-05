@@ -360,6 +360,10 @@ Remote commands can have irreversible side effects even when the MCP transport i
 If this project saves you tokens and flaky reconnects, a ⭐ on GitHub helps others find it.
 
 <!-- star-history:start -->
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="assets/star-history/star-history-dark.svg">
+  <img alt="Star history" src="assets/star-history/star-history-light.svg">
+</picture>
 <!-- star-history:end -->
 
 <p align="center">

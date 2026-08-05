@@ -358,6 +358,10 @@ npm audit --omit=dev
 如果这个项目帮你省了 token、少踩了断线坑，点个 ⭐ 能让更多人发现它。
 
 <!-- star-history:start -->
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="assets/star-history/star-history-dark.svg">
+  <img alt="Star history" src="assets/star-history/star-history-light.svg">
+</picture>
 <!-- star-history:end -->
 
 <p align="center">
