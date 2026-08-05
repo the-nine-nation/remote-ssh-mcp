@@ -3,7 +3,7 @@ import test from "node:test";
 import { Client } from "@modelcontextprotocol/client";
 import { StdioClientTransport } from "@modelcontextprotocol/client/stdio";
 
-test("stdio MCP server lists and calls all six tools", async () => {
+test("stdio MCP server lists and calls all seven tools", async () => {
   const env = Object.fromEntries(
     Object.entries(process.env).filter(
       (entry): entry is [string, string] => entry[1] !== undefined,
@@ -32,6 +32,7 @@ test("stdio MCP server lists and calls all six tools", async () => {
       listed.tools.map((tool) => tool.name).sort(),
       [
         "ssh_close",
+        "ssh_hosts",
         "ssh_interrupt",
         "ssh_list",
         "ssh_open",
@@ -70,6 +71,26 @@ test("stdio MCP server lists and calls all six tools", async () => {
       max_sessions: 8,
       sessions: [],
     });
+
+    const hosts = await client.callTool({
+      name: "ssh_hosts",
+      arguments: {},
+    });
+    assert.equal(hosts.isError, false);
+    const payload = hosts.structuredContent as {
+      status: string;
+      hosts: Array<{ alias: string; sources: string[] }>;
+      credentials: string;
+      host_count: number;
+    };
+    assert.equal(payload.status, "ok");
+    assert.equal(payload.host_count, 1);
+    assert.deepEqual(payload.hosts, [
+      { alias: "test", sources: ["explicit"] },
+    ]);
+    assert.match(payload.credentials, /Private keys/i);
+    assert.equal(JSON.stringify(payload.hosts).includes("IdentityFile"), false);
+    assert.equal(JSON.stringify(payload.hosts).includes("id_"), false);
   } finally {
     await client.close();
   }

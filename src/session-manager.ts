@@ -2,10 +2,11 @@ import { randomBytes } from "node:crypto";
 import { AuditLogger, commandAuditFields } from "./audit.js";
 import { checkDenylist } from "./denylist.js";
 import { SshSession } from "./session.js";
+import { reloadHostCatalog } from "./config.js";
 import type { ServerConfig } from "./types.js";
 
 export class SessionManager {
-  readonly #config: ServerConfig;
+  #config: ServerConfig;
   readonly #audit: AuditLogger;
   readonly #sessions = new Map<string, SshSession>();
   readonly #openingSessions = new Set<SshSession>();
@@ -45,7 +46,7 @@ export class SessionManager {
         status: "host_not_allowed",
         host,
         message:
-          "host must be an exact, non-wildcard Host alias from ssh_config or SSH_MCP_ALLOWED_HOSTS",
+          "host must be an exact, non-wildcard Host alias from ssh_config or SSH_MCP_ALLOWED_HOSTS; call ssh_hosts to list aliases",
         allowed_hosts: [...this.#config.allowedHosts].sort(),
       };
     }
@@ -221,6 +222,31 @@ export class SessionManager {
       sessions: [...this.#sessions.values()]
         .map((session) => session.summary(now))
         .sort((left, right) => left.created_at.localeCompare(right.created_at)),
+    };
+  }
+
+  async listHosts(reload = false): Promise<Record<string, unknown>> {
+    let reloaded = false;
+    if (reload) {
+      const catalog = await reloadHostCatalog(this.#config);
+      this.#config = {
+        ...this.#config,
+        allowedHosts: catalog.allowedHosts,
+        hosts: catalog.hosts,
+        allowedHostsSource: catalog.allowedHostsSource,
+      };
+      reloaded = true;
+    }
+
+    return {
+      status: "ok",
+      reloaded,
+      ssh_config_path: this.#config.sshConfigPath,
+      sources: this.#config.allowedHostsSource,
+      host_count: this.#config.hosts.length,
+      hosts: this.#config.hosts,
+      credentials:
+        "OpenSSH client only. Private keys, IdentityFile paths, agent sockets, and ProxyCommand are never returned. Do not read ~/.ssh key files; call ssh_open with an alias instead.",
     };
   }
 

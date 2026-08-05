@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { chmod, mkdtemp, readFile } from "node:fs/promises";
+import { chmod, mkdtemp, readFile, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import test from "node:test";
@@ -18,7 +18,11 @@ async function fixture(
   const auditLogPath = join(directory, "audit.jsonl");
   const manager = new SessionManager({
     allowedHosts: new Set(["test"]),
+    hosts: [{ alias: "test", sources: ["explicit"] }],
     allowedHostsSource: ["test"],
+    sshConfigPath: join(directory, "ssh-config"),
+    explicitHosts: ["test"],
+    home: directory,
     sshPath: fakeSsh,
     maxTimeoutSec: 10,
     defaultWaitSec: 0.1,
@@ -34,6 +38,66 @@ async function fixture(
   });
   return { manager, auditLogPath };
 }
+
+test("listHosts returns safe catalog and reload re-parses ssh_config", async (t) => {
+  const directory = await mkdtemp(join(tmpdir(), "sshmcp-hosts-mgr-"));
+  const sshConfigPath = join(directory, "ssh-config");
+  await writeFile(
+    sshConfigPath,
+    "Host prod\n  HostName prod.example.com\n  User root\n  IdentityFile ~/.ssh/id_ed25519\n",
+  );
+  const { manager } = await fixture({
+    allowedHosts: new Set(["prod"]),
+    hosts: [
+      {
+        alias: "prod",
+        hostname: "prod.example.com",
+        user: "root",
+        sources: ["ssh_config"],
+      },
+    ],
+    allowedHostsSource: [`ssh_config:${sshConfigPath}`],
+    sshConfigPath,
+    explicitHosts: [],
+    home: directory,
+  });
+  t.after(() => manager.closeAll());
+
+  const listed = await manager.listHosts();
+  assert.equal(listed.status, "ok");
+  assert.equal(listed.reloaded, false);
+  assert.equal(listed.host_count, 1);
+  assert.match(String(listed.credentials), /Private keys/i);
+  assert.equal(JSON.stringify(listed).includes("id_ed25519"), false);
+
+  await writeFile(
+    sshConfigPath,
+    [
+      "Host prod",
+      "  HostName prod.example.com",
+      "  User root",
+      "Host staging",
+      "  HostName staging.example.com",
+      "",
+    ].join("\n"),
+  );
+
+  const reloaded = await manager.listHosts(true);
+  assert.equal(reloaded.reloaded, true);
+  assert.equal(reloaded.host_count, 2);
+  const aliases = (reloaded.hosts as Array<{ alias: string }>).map(
+    (host) => host.alias,
+  );
+  assert.deepEqual(aliases, ["prod", "staging"]);
+
+  const denied = await manager.open("gone");
+  assert.equal(denied.status, "host_not_allowed");
+  assert.equal(manager.config.allowedHosts.has("staging"), true);
+  assert.deepEqual(
+    manager.config.hosts.map((host) => host.alias),
+    ["prod", "staging"],
+  );
+});
 
 test("persistent session preserves cwd/env and separates output", async (t) => {
   const { manager, auditLogPath } = await fixture();

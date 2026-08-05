@@ -18,6 +18,8 @@ export function buildServer(manager: SessionManager): McpServer {
         "Reuse the same id to preserve cwd and environment variables.",
         "For a clean environment, close the old session and open a new one.",
         "Do not invent ids; use ids returned by ssh_open or ssh_list.",
+        "Call ssh_hosts to discover allowed Host aliases from the local OpenSSH config before opening a session.",
+        "Never read SSH private keys, IdentityFile paths, or agent sockets from disk. Authentication is handled only by the local OpenSSH client when ssh_open runs.",
         "Avoid interactive TUI programs. Use ssh_peek and ssh_interrupt for a stuck command.",
         "ssh_run may return running after wait_sec while the remote command continues; do not retry it. Poll ssh_peek with wait_sec so the call blocks until the command finishes or the wait expires; do not busy-loop with wait_sec=0. Interrupt it, or open another session for concurrent work.",
         "Commands have no automatic execution timeout unless timeout_sec is explicitly provided; the model owns their lifecycle.",
@@ -28,11 +30,30 @@ export function buildServer(manager: SessionManager): McpServer {
   );
 
   server.registerTool(
+    "ssh_hosts",
+    {
+      title: "List allowed SSH Host aliases",
+      description:
+        "List allowed OpenSSH Host aliases discovered from the local ssh_config (and explicit allowlist). Returns only safe connection metadata: alias, hostname, user, port, proxy_jump. Never returns private keys, IdentityFile paths, agent sockets, or ProxyCommand. Pass reload=true after editing ~/.ssh/config to re-parse without restarting the MCP server. Use an alias from this list with ssh_open.",
+      inputSchema: z.object({
+        reload: z.boolean().default(false),
+      }),
+      annotations: {
+        readOnlyHint: true,
+        destructiveHint: false,
+        idempotentHint: true,
+        openWorldHint: false,
+      },
+    },
+    async ({ reload }) => toToolResult(await manager.listHosts(reload)),
+  );
+
+  server.registerTool(
     "ssh_open",
     {
       title: "Open persistent SSH session",
       description:
-        "Open a new persistent remote bash shell for an allowed ssh_config Host alias. Each call creates a clean session with a new id. Credentials come only from local OpenSSH configuration/agent; passwords and private keys are never accepted as arguments.",
+        "Open a new persistent remote bash shell for an allowed ssh_config Host alias from ssh_hosts. Each call creates a clean session with a new id. Credentials come only from local OpenSSH configuration/agent; passwords and private keys are never accepted as arguments and must not be read from disk by the model.",
       inputSchema: z.object({
         host: z
           .string()
