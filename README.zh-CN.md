@@ -2,17 +2,21 @@
 
 [English](./README.md) | **简体中文**
 
-把一条持久、有状态的远程 Bash 暴露为 6 个 MCP 工具。相同 session id 会保留
+把一条持久、有状态的远程 Bash 暴露为 7 个 MCP 工具。相同 session id 会保留
 `cwd`、环境变量和 shell 副作用；需要干净环境时关闭旧 session，再新开一个。
 
 ## 已实现
 
+- `ssh_hosts`：列出本机 `ssh_config` 中允许的 Host 别名（仅安全元数据；`reload=true` 可热重载）
 - `ssh_open`：为允许的 SSH Host 别名新建持久 session
 - `ssh_run`：在同一远程 Bash 中执行非交互命令
 - `ssh_peek`：查看运行状态和最新 N 行输出，默认 50 行；可选 `wait_sec` 在运行中长轮询
 - `ssh_interrupt`：发送 Ctrl-C；只有确认协议恢复才保留 session
 - `ssh_list`：列出存活 session、cwd、idle 回收倒计时与连接水位
 - `ssh_close`：清理远程临时目录并释放 SSH 连接
+
+推荐流程：`ssh_hosts` → `ssh_open(host=别名)` → `ssh_run`。修改 `~/.ssh/config`
+后调用 `ssh_hosts(reload=true)` 即可，不必重启 MCP。
 
 `ssh_run` 默认只同步等待 10 秒，到期后返回 `running`，远端命令继续执行。
 默认没有执行超时，也不会自动发送 Ctrl-C；只有模型显式传入 `timeout_sec`
@@ -21,6 +25,9 @@
 
 实现复用本机 `ssh`，因此 `~/.ssh/config`、known_hosts、SSH agent、ProxyJump
 和硬件密钥策略仍由 OpenSSH 负责。服务不接收密码、私钥文本或任意 SSH 参数。
+`ssh_hosts` 只返回 `alias` / `hostname` / `user` / `port` / `proxy_jump`，
+**绝不**返回 `IdentityFile`、证书路径、agent socket 或 `ProxyCommand`。
+模型应直接 `ssh_open`，不要去读 `~/.ssh` 下的私钥文件。
 
 ## 环境要求
 
@@ -69,6 +76,12 @@ node /absolute/path/to/remote_ssh_mcp/dist/index.js
 `SSH_MCP_ALLOWED_HOSTS` 是附加 allowlist。默认还会读取 `~/.ssh/config` 及其
 `Include` 文件中的精确 `Host` 别名；包含 `*`、`?` 或 `!` 的模式不会进入
 allowlist。工具参数只接受安全别名，不接受 `user@host`、端口或额外 SSH 选项。
+
+### 凭证边界
+
+认证只发生在本机 OpenSSH client 内部。MCP 工具不接受密码/私钥参数；
+`ssh_hosts` 也不返回任何密钥路径。Agent 用 Host 别名调用 `ssh_open` 即可，
+不要用本地文件工具去读取 `~/.ssh` 私钥。
 
 ## 配置
 

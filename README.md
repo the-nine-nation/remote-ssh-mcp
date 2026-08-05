@@ -34,14 +34,16 @@ ssh_close(id) → release the shell and connection
 - Safe fail-closed behavior when shell recovery cannot be confirmed
 - Head-and-tail output truncation with valid UTF-8 boundaries
 - Exact SSH Host alias allowlist from `ssh_config` and explicit configuration
+- `ssh_hosts` discovery with safe metadata (`hostname`, `user`, `port`, `proxy_jump`) and optional hot reload
 - Session limits, idle reaping, command auditing, and a minimal safety denylist
 - MCP stdio support for both legacy and current protocol handshakes
-- No password, private-key text, or arbitrary SSH option arguments
+- No password, private-key text, IdentityFile paths, or arbitrary SSH option arguments
 
 ## MCP tools
 
 | Tool | Purpose |
 |---|---|
+| `ssh_hosts` | List allowed Host aliases from local `ssh_config` (safe metadata only; `reload=true` re-parses) |
 | `ssh_open` | Open a clean persistent shell for an allowed SSH Host alias |
 | `ssh_run` | Run a non-interactive command in an existing session |
 | `ssh_peek` | Inspect status and the latest N output lines; optional `wait_sec` long-polls while running |
@@ -104,6 +106,25 @@ may differ by host:
 server also discovers exact `Host` aliases from `~/.ssh/config` and its
 `Include` files. Patterns containing `*`, `?`, or `!` are ignored. Tool inputs
 accept only safe aliases, not `user@host`, ports, or extra SSH options.
+
+Typical agent flow:
+
+```text
+ssh_hosts()            → pick an alias
+ssh_open(host=alias)   → session id
+ssh_run(id, command)   → work on the remote shell
+```
+
+After editing `~/.ssh/config`, call `ssh_hosts(reload=true)` instead of
+restarting the MCP server.
+
+### Credential boundary
+
+Authentication stays inside the local OpenSSH client. The MCP tools never
+accept passwords or private-key material, and `ssh_hosts` never returns
+`IdentityFile`, certificate paths, agent sockets, or `ProxyCommand`. Agents
+should call `ssh_open` with a Host alias and must not read `~/.ssh` private key
+files from disk.
 
 ## Configuration
 
