@@ -27,7 +27,7 @@
   <a href="https://www.openssh.com/"><img src="https://img.shields.io/badge/OpenSSH-native-1ABC9C.svg?style=flat-square" alt="OpenSSH" /></a>
   <img src="https://img.shields.io/badge/version-0.2.0-informational.svg?style=flat-square" alt="Version 0.2.0" />
   <a href="https://github.com/the-nine-nation/remote-ssh-mcp/releases/tag/v0.2.0"><img src="https://img.shields.io/github/v/release/the-nine-nation/remote-ssh-mcp?style=flat-square&label=release" alt="GitHub release" /></a>
-  <a href="https://www.npmjs.com/package/remote-ssh-mcp"><img src="https://img.shields.io/npm/v/remote-ssh-mcp?style=flat-square" alt="npm version" /></a>
+  <a href="https://www.npmjs.com/package/@zyluo/remote-ssh-mcp"><img src="https://img.shields.io/npm/v/%40zyluo%2Fremote-ssh-mcp?style=flat-square" alt="npm version" /></a>
   <a href="https://github.com/the-nine-nation/remote-ssh-mcp/stargazers"><img src="https://img.shields.io/github/stars/the-nine-nation/remote-ssh-mcp?style=flat-square" alt="GitHub stars" /></a>
 </p>
 
@@ -205,9 +205,9 @@ node /absolute/path/to/remote-ssh-mcp/dist/index.js
 Or install from npm (once published):
 
 ```bash
-npx remote-ssh-mcp
+npx @zyluo/remote-ssh-mcp
 # or
-npm install -g remote-ssh-mcp
+npm install -g @zyluo/remote-ssh-mcp
 remote-ssh-mcp
 ```
 

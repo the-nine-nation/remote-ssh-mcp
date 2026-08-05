@@ -1,10 +1,10 @@
 {
-  "name": "remote-ssh-mcp",
+  "name": "@zyluo/remote-ssh-mcp",
   "version": "0.2.0",
   "description": "Persistent, stateful remote SSH sessions for AI agents via Model Context Protocol (MCP)",
   "type": "module",
   "bin": {
-    "remote-ssh-mcp": "./dist/index.js"
+    "remote-ssh-mcp": "dist/index.js"
   },
   "files": [
     "dist",
