@@ -357,10 +357,11 @@ Remote commands can have irreversible side effects even when the MCP transport i
 
 ## Star History
 
-<a href="https://www.star-history.com/?repos=the-nine-nation%2Fremote-ssh-mcp&type=date&legend=top-left">
- <picture>
-   <source media="(prefers-color-scheme: dark)" srcset="https://api.star-history.com/chart?repos=the-nine-nation/remote-ssh-mcp&type=date&theme=dark&legend=top-left&sealed_token=N29lgMRV62AFUZO3wU9S1GYnEgePWGLfMw3_S1SZEGpuhPutweTKdDQJcJcbhGfKN-2eeIhbqdKXO9NBfmW1asEVM-UnuIunJIUBmmfhA1Hk2kwkLkrn_J6TDBo6Vy5q9htfrw3eLY7c8j5W_gDqNd-V8cXL54EgxTdi2jHh9PWJxDXO-xcxf6w1R4ts" />
-   <source media="(prefers-color-scheme: light)" srcset="https://api.star-history.com/chart?repos=the-nine-nation/remote-ssh-mcp&type=date&legend=top-left&sealed_token=N29lgMRV62AFUZO3wU9S1GYnEgePWGLfMw3_S1SZEGpuhPutweTKdDQJcJcbhGfKN-2eeIhbqdKXO9NBfmW1asEVM-UnuIunJIUBmmfhA1Hk2kwkLkrn_J6TDBo6Vy5q9htfrw3eLY7c8j5W_gDqNd-V8cXL54EgxTdi2jHh9PWJxDXO-xcxf6w1R4ts" />
-   <img alt="Star History Chart" src="https://api.star-history.com/chart?repos=the-nine-nation/remote-ssh-mcp&type=date&legend=top-left&sealed_token=N29lgMRV62AFUZO3wU9S1GYnEgePWGLfMw3_S1SZEGpuhPutweTKdDQJcJcbhGfKN-2eeIhbqdKXO9NBfmW1asEVM-UnuIunJIUBmmfhA1Hk2kwkLkrn_J6TDBo6Vy5q9htfrw3eLY7c8j5W_gDqNd-V8cXL54EgxTdi2jHh9PWJxDXO-xcxf6w1R4ts" />
- </picture>
-</a>
+If this project saves you tokens and flaky reconnects, a ⭐ on GitHub helps others find it.
+
+<!-- star-history:start -->
+<!-- star-history:end -->
+
+<p align="center">
+  <sub>Built for agents that need a real remote shell — not another one-shot <code>ssh host "…"</code>.</sub>
+</p>

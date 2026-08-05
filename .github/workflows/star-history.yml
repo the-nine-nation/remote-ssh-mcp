@@ -1,0 +1,39 @@
+name: Star History
+
+on:
+  schedule:
+    # Refresh a few times a day; also re-runs when someone stars the repo.
+    - cron: "0 */6 * * *"
+  watch:
+    types: [started]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: star-history
+  cancel-in-progress: true
+
+jobs:
+  star-history:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # Render once, update English README, leave commit for the next step
+      # so both READMEs land in a single push.
+      - name: Update English README chart
+        uses: narayann7/star-history-action@v1.0.4
+        with:
+          repos: ${{ github.repository }}
+          readme: README.md
+          commit: false
+
+      - name: Update Chinese README chart
+        uses: narayann7/star-history-action@v1.0.4
+        with:
+          repos: ${{ github.repository }}
+          readme: README.zh-CN.md
+          commit: true
+          commit-message: "chore: update star history chart [skip ci]"
