@@ -21,19 +21,53 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      # Render once, update English README, leave commit for the next step
-      # so both READMEs land in a single push.
-      - name: Update English README chart
+      # Render charts + fill English README markers. commit:false so we can
+      # also mirror the embed into the Chinese README before one push.
+      # (Running the action twice skips the second commit when files are stable.)
+      - name: Render charts and update English README
         uses: narayann7/star-history-action@v1.0.4
         with:
           repos: ${{ github.repository }}
           readme: README.md
           commit: false
 
-      - name: Update Chinese README chart
-        uses: narayann7/star-history-action@v1.0.4
-        with:
-          repos: ${{ github.repository }}
-          readme: README.zh-CN.md
-          commit: true
-          commit-message: "chore: update star history chart [skip ci]"
+      - name: Mirror chart embed into Chinese README
+        run: |
+          python3 <<'PY'
+          import re
+          from pathlib import Path
+
+          start = "<!-- star-history:start -->"
+          end = "<!-- star-history:end -->"
+          en = Path("README.md").read_text(encoding="utf-8")
+          m = re.search(re.escape(start) + r".*?" + re.escape(end), en, re.S)
+          if not m:
+              raise SystemExit("English star-history markers missing after render")
+          block = m.group(0)
+
+          zh_path = Path("README.zh-CN.md")
+          zh = zh_path.read_text(encoding="utf-8")
+          if start not in zh or end not in zh:
+              raise SystemExit("Chinese star-history markers missing")
+          new = re.sub(
+              re.escape(start) + r".*?" + re.escape(end),
+              lambda _: block,
+              zh,
+              count=1,
+              flags=re.S,
+          )
+          zh_path.write_text(new, encoding="utf-8")
+          print("Mirrored star-history embed into README.zh-CN.md")
+          PY
+
+      - name: Commit charts and README updates
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add assets/star-history README.md README.zh-CN.md
+          if git diff --cached --quiet; then
+            echo "No star history changes to commit"
+          else
+            git commit -m "chore: update star history chart [skip ci]"
+            git push
+          fi
