@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { HeadTailBuffer } from "../src/output-buffer.js";
 import {
+  buildOpenFrame,
   buildRunFrame,
   parseReadyMarker,
   RunFrameParser,
@@ -56,4 +57,32 @@ test("parseReadyMarker ignores banner bytes", () => {
   );
   assert.equal(parsed?.exitCode, 0);
   assert.equal(parsed?.cwd, "/home/app");
+});
+
+test("parseReadyMarker skips PTY-echoed open-frame template", () => {
+  const token = "192f749c458e5355";
+  const cwd = Buffer.from("/root").toString("base64");
+  // ssh -tt echoes the open frame before stty -echo; the printf template
+  // contains a literal __SSHMCP_READY: prefix that must not trap the parser.
+  const openFrame = buildOpenFrame(token, "/tmp/.sshmcp-test");
+  const echoed = openFrame.replaceAll("\n", "\r\n");
+  const wire = Buffer.from(
+    `${echoed}command stty -echo -onlcr\r\n\n__SSHMCP_READY:0:${token}:${cwd}__\n`,
+  );
+  const parsed = parseReadyMarker(wire, token);
+  assert.equal(parsed?.exitCode, 0);
+  assert.equal(parsed?.cwd, "/root");
+  assert.ok(parsed && parsed.consumed > 0);
+  assert.equal(
+    wire.subarray(parsed.consumed).includes(Buffer.from("__SSHMCP_READY:")),
+    false,
+  );
+});
+
+test("parseReadyMarker waits when only an incomplete false marker is present", () => {
+  const token = "abcdef0123456789";
+  const partial = Buffer.from(
+    `builtin printf '\\n__SSHMCP_READY:%s:${token}:%s__\\n'`,
+  );
+  assert.equal(parseReadyMarker(partial, token), undefined);
 });

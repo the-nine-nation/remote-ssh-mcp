@@ -151,21 +151,33 @@ export function parseReadyMarker(
   input: Buffer,
   token: string,
 ): { consumed: number; exitCode: number; cwd?: string } | undefined {
+  // With ssh -tt, the open frame is often fully echoed before `stty -echo`
+  // takes effect. That echo includes the printf template containing a
+  // literal `__SSHMCP_READY:` prefix. Skip non-matching occurrences so a
+  // later real marker is still found.
   const marker = Buffer.from(`__SSHMCP_READY:`);
-  const start = input.indexOf(marker);
-  if (start < 0) return undefined;
-  const end = input.indexOf(0x0a, start);
-  if (end < 0) return undefined;
-  const line = input.subarray(start, end).toString("utf8").replace(/\r$/, "");
-  const match = new RegExp(
+  const readyLine = new RegExp(
     `^__SSHMCP_READY:(-?\\d+):${token}:([A-Za-z0-9+/=]*)__$`,
-  ).exec(line);
-  if (!match) return undefined;
-  const exitCode = Number.parseInt(match[1] ?? "1", 10);
-  const cwd = decodeBase64(match[2] ?? "");
-  return cwd === undefined
-    ? { consumed: end + 1, exitCode }
-    : { consumed: end + 1, exitCode, cwd };
+  );
+  let searchFrom = 0;
+  while (searchFrom <= input.length) {
+    const start = input.indexOf(marker, searchFrom);
+    if (start < 0) return undefined;
+    const end = input.indexOf(0x0a, start);
+    if (end < 0) return undefined;
+    const line = input.subarray(start, end).toString("utf8").replace(/\r$/, "");
+    const match = readyLine.exec(line);
+    if (!match) {
+      searchFrom = start + marker.length;
+      continue;
+    }
+    const exitCode = Number.parseInt(match[1] ?? "1", 10);
+    const cwd = decodeBase64(match[2] ?? "");
+    return cwd === undefined
+      ? { consumed: end + 1, exitCode }
+      : { consumed: end + 1, exitCode, cwd };
+  }
+  return undefined;
 }
 
 function decodeBase64(value: string): string | undefined {
