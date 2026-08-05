@@ -1,8 +1,16 @@
 import { homedir } from "node:os";
-import { readFile, readdir } from "node:fs/promises";
-import { dirname, isAbsolute, join, resolve } from "node:path";
+import { readFile } from "node:fs/promises";
+import { join } from "node:path";
 import * as z from "zod/v4";
+import {
+  discoverSshConfig,
+  expandHome,
+  isSafeHostAlias,
+  mergeHostCatalog,
+} from "./ssh-config.js";
 import type { ServerConfig } from "./types.js";
+
+export { isSafeHostAlias } from "./ssh-config.js";
 
 const ConfigFileSchema = z
   .object({
@@ -38,14 +46,12 @@ export async function loadConfig(
     home,
   );
 
-  const discoveredHosts = await discoverSshAliases(sshConfigPath, home);
-  const configuredHosts = [
+  const explicitHosts = [
     ...(file.allowedHosts ?? []),
     ...splitCsv(env.SSH_MCP_ALLOWED_HOSTS),
-  ];
-  const allowedHosts = new Set(
-    [...discoveredHosts, ...configuredHosts].filter(isSafeHostAlias),
-  );
+  ].filter(isSafeHostAlias);
+
+  const hostCatalog = await buildHostCatalog(sshConfigPath, home, explicitHosts);
 
   const maxTimeoutSec = positiveNumber(
     env.SSH_MCP_MAX_TIMEOUT_SEC,
@@ -75,11 +81,15 @@ export async function loadConfig(
   );
 
   return {
-    allowedHosts,
+    allowedHosts: hostCatalog.allowedHosts,
+    hosts: hostCatalog.hosts,
     allowedHostsSource: [
       `ssh_config:${sshConfigPath}`,
-      ...(configuredHosts.length > 0 ? ["explicit configuration"] : []),
+      ...(explicitHosts.length > 0 ? ["explicit configuration"] : []),
     ],
+    sshConfigPath,
+    explicitHosts,
+    home,
     sshPath: env.SSH_MCP_SSH_PATH ?? file.sshPath ?? "ssh",
     maxTimeoutSec,
     defaultWaitSec,
@@ -111,12 +121,31 @@ export async function loadConfig(
   };
 }
 
-export function isSafeHostAlias(host: string): boolean {
-  return (
-    host.length >= 1 &&
-    host.length <= 255 &&
-    /^[A-Za-z0-9][A-Za-z0-9._-]*$/.test(host)
+export async function reloadHostCatalog(
+  config: ServerConfig,
+): Promise<Pick<ServerConfig, "allowedHosts" | "hosts" | "allowedHostsSource">> {
+  const hostCatalog = await buildHostCatalog(
+    config.sshConfigPath,
+    config.home,
+    config.explicitHosts,
   );
+  return {
+    allowedHosts: hostCatalog.allowedHosts,
+    hosts: hostCatalog.hosts,
+    allowedHostsSource: [
+      `ssh_config:${config.sshConfigPath}`,
+      ...(config.explicitHosts.length > 0 ? ["explicit configuration"] : []),
+    ],
+  };
+}
+
+async function buildHostCatalog(
+  sshConfigPath: string,
+  home: string,
+  explicitHosts: readonly string[],
+): Promise<ReturnType<typeof mergeHostCatalog>> {
+  const discovered = await discoverSshConfig(sshConfigPath, home);
+  return mergeHostCatalog(discovered, explicitHosts);
 }
 
 async function readOptionalJson(path: string): Promise<ConfigFile> {
@@ -133,105 +162,6 @@ async function readOptionalJson(path: string): Promise<ConfigFile> {
     }
     throw error;
   }
-}
-
-async function discoverSshAliases(
-  entryPath: string,
-  home: string,
-): Promise<Set<string>> {
-  const aliases = new Set<string>();
-  const visited = new Set<string>();
-  const includeBase = dirname(resolve(entryPath));
-
-  async function visit(path: string): Promise<void> {
-    const normalized = resolve(path);
-    if (visited.has(normalized)) return;
-    visited.add(normalized);
-
-    let raw: string;
-    try {
-      raw = await readFile(normalized, "utf8");
-    } catch (error) {
-      if (isNodeError(error) && error.code === "ENOENT") return;
-      throw error;
-    }
-
-    for (const originalLine of raw.split(/\r?\n/)) {
-      const line = originalLine.trim();
-      if (!line || line.startsWith("#")) continue;
-      const separator = line.search(/\s/);
-      if (separator < 0) continue;
-      const keyword = line.slice(0, separator).toLowerCase();
-      const value = stripTrailingComment(line.slice(separator).trim());
-
-      if (keyword === "host") {
-        for (const candidate of splitSshWords(value)) {
-          if (
-            !candidate.startsWith("!") &&
-            !candidate.includes("*") &&
-            !candidate.includes("?") &&
-            isSafeHostAlias(candidate)
-          ) {
-            aliases.add(candidate);
-          }
-        }
-      } else if (keyword === "include") {
-        for (const includePattern of splitSshWords(value)) {
-          const expanded = expandHome(includePattern, home);
-          const absolute = isAbsolute(expanded)
-            ? expanded
-            : resolve(includeBase, expanded);
-          for (const match of await expandSimpleGlob(absolute)) {
-            await visit(match);
-          }
-        }
-      }
-    }
-  }
-
-  await visit(entryPath);
-  return aliases;
-}
-
-async function expandSimpleGlob(pattern: string): Promise<string[]> {
-  if (!pattern.includes("*") && !pattern.includes("?")) return [pattern];
-  const directory = dirname(pattern);
-  const basename = pattern.slice(directory.length + (directory === "/" ? 0 : 1));
-  if (directory.includes("*") || directory.includes("?")) return [];
-  const regex = new RegExp(
-    `^${basename
-      .replace(/[.+^${}()|[\]\\]/g, "\\$&")
-      .replaceAll("*", ".*")
-      .replaceAll("?", ".")}$`,
-  );
-  try {
-    return (await readdir(directory))
-      .filter((entry) => regex.test(entry))
-      .sort()
-      .map((entry) => join(directory, entry));
-  } catch (error) {
-    if (isNodeError(error) && error.code === "ENOENT") return [];
-    throw error;
-  }
-}
-
-function splitSshWords(value: string): string[] {
-  const words: string[] = [];
-  const pattern = /"([^"]*)"|'([^']*)'|(\S+)/g;
-  for (const match of value.matchAll(pattern)) {
-    words.push(match[1] ?? match[2] ?? match[3] ?? "");
-  }
-  return words;
-}
-
-function stripTrailingComment(value: string): string {
-  return value.replace(/\s+#.*$/, "").trim();
-}
-
-function expandHome(path: string, home: string): string {
-  if (path === "~") return home;
-  if (path.startsWith("~/")) return join(home, path.slice(2));
-  return path;
 }
 
 function splitCsv(value: string | undefined): string[] {
