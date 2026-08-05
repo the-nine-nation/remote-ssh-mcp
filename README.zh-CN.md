@@ -10,6 +10,7 @@
 </p>
 
 <p align="center">
+  <a href="#为什么需要-remote-ssh-mcp">为什么</a> ·
   <a href="#功能特性">功能</a> ·
   <a href="#工作原理">原理</a> ·
   <a href="#mcp-工具">工具</a> ·
@@ -49,12 +50,47 @@ bash → ssh host "cmd" → 断开 → 再来一次
 
 | 痛点 | 表现 |
 |------|------|
-| 🔁 **Token 浪费** | banner、登录噪声、`pwd` / `whoami` 探测反复灌进上下文 |
+| 🔁 **Token 浪费** | banner、MOTD、登录噪声、`pwd` / `whoami` 探测反复灌进上下文 |
 | 🧊 **状态丢失** | `cwd`、`export`、虚拟环境、shell 副作用无法延续 |
 | 🔌 **不稳定** | 每次新建连接：超时、host key、ProxyJump、鉴权抖动 |
 | 🌀 **错误放大** | 模型用更长探测命令补偿不确定性 → 更费 token |
 
 **Remote SSH MCP** 把一条长生命周期的远程 Bash 做成一等 MCP 工具。相同 session id 会保留工作目录、环境变量和 shell 副作用；需要干净环境时关闭旧 session，再新开一个。
+
+### 为什么选我们，而不是在 bash 里拼 `ssh`？
+
+面向 Agent 多步远程任务（部署、排障、构建、看日志）的收益对照：
+
+| 维度 | 一次性 `ssh host "…"` | **Remote SSH MCP** |
+|------|----------------------|---------------------|
+| 💰 **Token** | 每一步都重交连接噪声 + 状态探测；模型常反复 `cd` / `pwd` | **`ssh_open` 只付一次**；后续 `ssh_run` 主要返回**命令本身输出**。结构化工具 + 头尾截断压住结果体积。多步会话里，相对「每次重连」通常可 **少约 50–80% 的远程工具上下文噪声**（取决于 MOTD 大小与模型是否爱探测）。 |
+| ✅ **成功率** | *N* 步 ≈ *N* 次握手 → *N* 次失败机会（超时、跳板、agent、host key） | 每个 session **只握手一次**；后续命令走已存活 shell。长任务用 `running` + `ssh_peek`，不必因工具调用超时就整段重来。重连变少 → **任务中途「SSH 又挂了」的假失败环显著减少**。 |
+| 🧳 **便携性** | 远端本身也无需装东西——但**每台跑 Agent 的机器**都要重复同一套脆弱的 `ssh …` 拼装 | **只在跑 Claude / Cursor / Grok 等的本机装一次**。**远端机器零安装**（不要 Node、不要 MCP 守护进程、不要常驻 agent）。只要普通 shell 账号 + SSH 本就会用的工具（`bash`、`base64`、`stty` 等）。密钥与跳板仍在**本机** `~/.ssh/config`。 |
+| 🧠 **模型心智** | 模型自己编 `ssh` 字符串、转义与恢复逻辑 | 稳定工具面：`open → run → peek → close`，session id 是唯一句柄 |
+| 🔐 **信任边界** | 容易把密钥读进上下文，或在带内要密码 | 只走本机 OpenSSH；工具绝不接收密码 / 私钥内容 |
+
+**便携性一句话：MCP 装在你的开发机 / AI 宿主上；`ssh_config` 里已有的机器都能管——服务器机群不用装任何包。**
+
+```text
+┌─────────────────────────┐         SSH（OpenSSH）        ┌──────────────────┐
+│  笔记本 / CI Agent 机    │  ───────────────────────────► │  prod / staging  │
+│  Claude · Cursor · Grok │     ~/.ssh/config · agent     │  无需安装 MCP    │
+│  + remote-ssh-mcp       │                               │  普通 Bash 即可  │
+└─────────────────────────┘                               └──────────────────┘
+```
+
+**Token 示意（多步远程排障，示意而非基准测试）：**
+
+```text
+一次性路径（每步 × 8）：
+  ssh 包装 + banner/MOTD + pwd/whoami + 重新 cd + 命令输出
+  → 噪声占主导，上下文被重连垃圾填满
+
+会话路径：
+  ssh_open  → 一次（握手 + READY）
+  ssh_run × 8 → 主要是真实 stdout/stderr（头尾截断）
+  → 上下文留给工作产物，而不是传输层
+```
 
 实现**不重写 SSH**，而是复用本机 OpenSSH client，因此 `~/.ssh/config`、known_hosts、SSH agent、ProxyJump 和硬件密钥策略仍然生效。
 

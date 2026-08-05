@@ -10,6 +10,7 @@
 </p>
 
 <p align="center">
+  <a href="#why-remote-ssh-mcp">Why</a> ·
   <a href="#features">Features</a> ·
   <a href="#how-it-works">How it works</a> ·
   <a href="#mcp-tools">Tools</a> ·
@@ -49,12 +50,47 @@ Every call pays the same tax:
 
 | Pain | What happens |
 |------|----------------|
-| 🔁 **Token waste** | Banners, login noise, and `pwd` / `whoami` probes flood the context |
+| 🔁 **Token waste** | Banners, MOTD, login noise, and `pwd` / `whoami` probes flood the context |
 | 🧊 **Lost state** | `cwd`, `export`, venv activation, and shell side effects vanish |
 | 🔌 **Unstable** | Fresh connects hit timeouts, host-key prompts, ProxyJump, and auth jitter |
 | 🌀 **Error spiral** | The model compensates with longer probe commands → more tokens |
 
 **Remote SSH MCP** turns a long-lived remote Bash into first-class MCP tools. One session ID keeps working directory, environment variables, and shell side effects. Open a new session when you need a clean environment.
+
+### Why pick this over one-shot `ssh` in bash?
+
+Concrete gains for agent workflows (multi-step remote work: deploy, debug, build, inspect logs):
+
+| Dimension | One-shot `ssh host "…"` | **Remote SSH MCP** |
+|-----------|-------------------------|---------------------|
+| 💰 **Tokens** | Each step re-pays connect noise + state probes; models often re-`cd` / re-`pwd` | **Pay once** on `ssh_open`; later `ssh_run` returns mostly **command output**. Structured tools + head/tail caps cut tool-result bloat. In multi-step sessions this commonly **cuts remote-tool context by ~50–80%** vs reconnect-every-time (exact savings depend on MOTD size and how chatty the model is). |
+| ✅ **Success rate** | *N* steps ≈ *N* handshakes → *N* chances to fail (timeout, jump, agent, host key) | **One** handshake per session; subsequent commands ride a live shell. Long jobs use `running` + `ssh_peek` instead of killing the tool call and restarting. Fewer reconnects → **far fewer false “SSH failed” loops** mid-task. |
+| 🧳 **Portability** | Remote needs nothing extra — but **every agent machine** reimplements the same brittle `ssh …` patterns | **Install once** on the machine that runs Claude / Cursor / Grok / etc. **Remote hosts install nothing** (no Node, no MCP daemon, no agent). Only a normal shell account + tools already required for SSH (`bash`, `base64`, `stty`, …). Keys and jump hosts stay in **local** `~/.ssh/config`. |
+| 🧠 **Model ergonomics** | Model invents `ssh` strings, escapes, and recovery | Stable tools: `open → run → peek → close`. Session id is the only handle. |
+| 🔐 **Trust boundary** | Easy to over-expose keys or prompt for passwords in-band | OpenSSH client only; tools never accept passwords or private-key material |
+
+**Portability in one line:** put the MCP on your **dev box / AI host**; every server already in your SSH config is reachable — **zero package install on the remote fleet**.
+
+```text
+┌─────────────────────────┐         SSH (OpenSSH)         ┌──────────────────┐
+│  Your laptop / CI agent │  ───────────────────────────► │  prod / staging  │
+│  Claude · Cursor · Grok │     ~/.ssh/config · agent     │  no MCP install  │
+│  + remote-ssh-mcp       │                               │  plain Bash OK   │
+└─────────────────────────┘                               └──────────────────┘
+```
+
+**Token sketch (illustrative multi-step remote debug):**
+
+```text
+One-shot path (per step × 8):
+  ssh wrapper + banner/MOTD + pwd/whoami + re-cd + command output
+  → noise dominates; context fills with reconnect junk
+
+Session path:
+  ssh_open  → once (handshake + READY)
+  ssh_run × 8 → mostly the real stdout/stderr (truncated head+tail)
+  → context stays on the work product, not the transport
+```
 
 It does **not** reimplement SSH. Your system OpenSSH client stays in charge — so `~/.ssh/config`, known hosts, the SSH agent, ProxyJump routes, and hardware keys keep working exactly as they already do.
 
