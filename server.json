@@ -1,7 +1,7 @@
 {
   "$schema": "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
   "name": "io.github.the-nine-nation/remote-ssh-mcp",
-  "description": "Persistent, stateful remote SSH sessions for AI agents via MCP. Reuses local OpenSSH; keeps cwd and env across commands.",
+  "description": "Persistent stateful remote SSH sessions for AI agents via MCP + OpenSSH.",
   "repository": {
     "url": "https://github.com/the-nine-nation/remote-ssh-mcp",
     "source": "github"
