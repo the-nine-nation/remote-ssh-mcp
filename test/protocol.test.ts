@@ -17,6 +17,15 @@ test("shellSingleQuote preserves quotes, newlines, comments, and substitutions",
   assert.match(quoted, /'\"'\"'/);
 });
 
+test("buildOpenFrame quiets PTY noise (stty, bracketed paste, TERM=dumb)", () => {
+  const frame = buildOpenFrame("tokentokentokentoken", "/tmp/.sshmcp-test");
+  assert.match(frame, /command stty -echo -onlcr/);
+  assert.match(frame, /export TERM=dumb NO_COLOR=1 CLICOLOR=0/);
+  assert.match(frame, /enable-bracketed-paste off/);
+  assert.match(frame, /\\033\[\?2004l/);
+  assert.match(frame, /__SSHMCP_READY:/);
+});
+
 test("buildRunFrame does not splice raw command syntax into the wrapper", () => {
   const frame = buildRunFrame(
     "0123456789abcdef0123456789abcdef",

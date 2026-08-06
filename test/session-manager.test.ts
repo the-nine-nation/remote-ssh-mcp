@@ -216,6 +216,26 @@ test("peek wait_sec expiry leaves the command running", async (t) => {
   assert.equal(finished.stdout, "late");
 });
 
+test("command output is sanitized (ANSI / bracketed paste stripped for the model)", async (t) => {
+  const { manager } = await fixture();
+  t.after(() => manager.closeAll());
+  const opened = await manager.open("test");
+  const id = opened.id as string;
+
+  const result = await manager.run(
+    id,
+    "printf '\\033[?2004h\\033[32mgreen\\033[0m\\n\\033[?2004l'",
+    1,
+  );
+  assert.equal(result.status, "ok");
+  assert.equal(result.stdout, "green\n");
+  assert.equal(result.stderr, "");
+  assert.match(JSON.stringify(result.stdout), /^"green\\n"$/);
+
+  const peeked = await manager.peek(id, 10);
+  assert.equal(peeked.stdout, "green\n");
+});
+
 test("peek returns the latest 50 lines by default and accepts a smaller limit", async (t) => {
   const { manager } = await fixture();
   t.after(() => manager.closeAll());

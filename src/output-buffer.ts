@@ -60,6 +60,75 @@ export class HeadTailBuffer {
   }
 }
 
+/**
+ * Strip VT/ANSI control sequences that PTY-backed shells and CLIs inject
+ * (bracketed paste, colors, cursor motion, OSC titles, …).
+ */
+export function stripAnsi(input: string): string {
+  if (input.length === 0) return input;
+  return (
+    input
+      // OSC: ESC ] … BEL | ST
+      .replace(/\u001b\][^\u0007\u001b]*(?:\u0007|\u001b\\)/g, "")
+      // DCS / PM / APC / SOS: ESC P|X|^|_ … ST (best-effort)
+      .replace(/\u001b[PX^_][^\u001b]*(?:\u001b\\)?/g, "")
+      // CSI: ESC [ … final (@–~), including ?2004h / colors / cursor
+      .replace(/\u001b\[[0-9;?]*[ -/]*[@-~]/g, "")
+      // Charset designation: ESC ( B, ESC ) 0, …
+      .replace(/\u001b[()][0-9A-Za-z]/g, "")
+      // Two-byte ESC sequences (e.g. ESC = / ESC > application keypad)
+      .replace(/\u001b[=>NOE78McZc]/g, "")
+      // Any remaining ESC + one byte (keep payload usable even if exotic)
+      .replace(/\u001b./g, "")
+  );
+}
+
+/**
+ * Prepare terminal output for model consumption:
+ * strip ANSI, apply CR overwrite, drop control-only noise lines,
+ * collapse blank-line runs, remove other C0 controls (keep tab/newline).
+ */
+export function sanitizeForModel(input: string): string {
+  if (input.length === 0) return "";
+
+  let text = stripAnsi(input);
+  // Drop other C0 controls except TAB / LF / CR (CR handled next).
+  text = text.replace(/[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F]/g, "");
+  text = text.replace(/\r\n/g, "\n");
+
+  // Within each logical line, treat CR as "overwrite from column 0".
+  text = text
+    .split("\n")
+    .map((line) => {
+      if (!line.includes("\r")) return line;
+      const parts = line.split("\r");
+      return parts[parts.length - 1] ?? "";
+    })
+    .join("\n");
+
+  const hasTrailingNewline = text.endsWith("\n");
+  const rawLines = text.split("\n");
+  if (hasTrailingNewline) rawLines.pop();
+
+  // Drop blank lines entirely: after ANSI strip they are almost always
+  // control-only noise (e.g. bracketed-paste CSI on its own line), and
+  // keeping them burns the model's `lines` budget.
+  const kept = rawLines.filter((line) => line.trim().length > 0);
+  if (kept.length === 0) return "";
+  const result = kept.join("\n");
+  return hasTrailingNewline ? `${result}\n` : result;
+}
+
+/**
+ * Present raw buffered stream text to the model: sanitize first, then
+ * optionally keep only the newest `lines` lines (counted after sanitize).
+ */
+export function presentOutput(input: string, lines?: number): string {
+  const clean = sanitizeForModel(input);
+  if (lines === undefined) return clean;
+  return latestLines(clean, lines);
+}
+
 export function latestLines(input: string, count: number): string {
   if (count <= 0 || input.length === 0) return "";
   const normalized = input.replace(/\r\n/g, "\n").replace(/\r/g, "\n");

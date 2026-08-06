@@ -4,3 +4,7 @@ dist/
 *.log
 .DS_Store
 .env
+.venv/
+.venv-*/
+**/bench-results/**/.venv/
+work/

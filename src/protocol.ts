@@ -12,6 +12,11 @@ export function buildOpenFrame(token: string, privateDir: string): string {
   const quotedDir = shellSingleQuote(privateDir);
   return [
     "command stty -echo -onlcr",
+    // PTY + interactive bash injects bracketed-paste CSI (?2004h/l) and CLIs
+    // often emit color when they detect a TTY. Quiet both at the source.
+    "builtin export TERM=dumb NO_COLOR=1 CLICOLOR=0",
+    "builtin bind 'set enable-bracketed-paste off' 2>/dev/null || true",
+    "builtin printf '\\033[?2004l' 2>/dev/null || true",
     "builtin umask 077",
     `command mkdir -m 700 -- ${quotedDir}`,
     "__sshmcp_open_rc=$?",

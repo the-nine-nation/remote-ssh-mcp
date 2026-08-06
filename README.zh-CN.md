@@ -26,8 +26,8 @@
   <a href="https://www.typescriptlang.org/"><img src="https://img.shields.io/badge/TypeScript-5.x-3178C6.svg?style=flat-square&logo=typescript&logoColor=white" alt="TypeScript" /></a>
   <a href="https://modelcontextprotocol.io"><img src="https://img.shields.io/badge/MCP-stdio-8B5CF6.svg?style=flat-square" alt="MCP stdio" /></a>
   <a href="https://www.openssh.com/"><img src="https://img.shields.io/badge/OpenSSH-native-1ABC9C.svg?style=flat-square" alt="OpenSSH" /></a>
-  <img src="https://img.shields.io/badge/version-0.2.1-informational.svg?style=flat-square" alt="Version 0.2.1" />
-  <a href="https://github.com/the-nine-nation/remote-ssh-mcp/releases/tag/v0.2.1"><img src="https://img.shields.io/github/v/release/the-nine-nation/remote-ssh-mcp?style=flat-square&label=release" alt="GitHub release" /></a>
+  <img src="https://img.shields.io/badge/version-0.2.2-informational.svg?style=flat-square" alt="Version 0.2.2" />
+  <a href="https://github.com/the-nine-nation/remote-ssh-mcp/releases/tag/v0.2.2"><img src="https://img.shields.io/github/v/release/the-nine-nation/remote-ssh-mcp?style=flat-square&label=release" alt="GitHub release" /></a>
   <a href="https://www.npmjs.com/package/@zyluo/remote-ssh-mcp"><img src="https://img.shields.io/npm/v/%40zyluo%2Fremote-ssh-mcp?style=flat-square" alt="npm version" /></a>
   <a href="https://github.com/the-nine-nation/remote-ssh-mcp/stargazers"><img src="https://img.shields.io/github/stars/the-nine-nation/remote-ssh-mcp?style=flat-square" alt="GitHub stars" /></a>
 </p>
@@ -139,6 +139,9 @@ ssh_close(id)            → 释放 shell 与连接
 
 - **`stdout` / `stderr` 分离**
 - 头尾 **字节截断**，并保证 UTF-8 边界完整
+- **展示前剥离 ANSI / PTY 噪声**（颜色、CSI、bracketed-paste 标记、纯控制空行）
+- **安静 open-frame**：`TERM=dumb`、`NO_COLOR`、关闭 bracketed-paste，从源头少产生垃圾输出
+- **精简 JSON 载荷**：省略空 `stderr`、`false` 截断标志与请求回显字段，双通道 `content` + `structuredContent` 更省 token
 - `ssh_hosts` 只返回安全元数据：`alias`、`hostname`、`user`、`port`、`proxy_jump`
 - 永不泄露 `IdentityFile`、证书、agent socket 或 `ProxyCommand`
 
@@ -381,11 +384,36 @@ npm audit --omit=dev
 
 | 项 | 状态 |
 |----|------|
-| 版本 | **0.2.1** |
+| 版本 | **0.2.2** |
 | 许可证 | [MIT](./LICENSE) |
 | 语言 | TypeScript（Node ≥ 20） |
 | 协议 | MCP over stdio |
 | 到主机的传输 | 系统 OpenSSH |
+
+---
+
+## 更新日志
+
+### 0.2.2 — 更安静的远端输出，更少 token
+
+PTY + 交互式 bash 常注入转义序列；经 JSON 转义后像「二进制」（`\u001b[?2004h`、颜色 CSI、光标码等），每次 `ssh_peek` / `ssh_run` 都在浪费上下文。
+
+| 改动 | 作用 |
+|------|------|
+| **展示时净化** | 剥离 ANSI/OSC/CSI，按 CR 覆盖（进度条），丢掉纯控制空行，再应用 `lines` 窗口 |
+| **安静会话打开** | 导出 `TERM=dumb` / `NO_COLOR` / `CLICOLOR=0`，关闭 bracketed-paste，open 时发送一次 `\033[?2004l` |
+| **精简工具载荷** | 省略空 `stderr`、`false` 标志（`truncated`、`interrupted` 等）与回显的 `lines`；保留空 `stdout` 以明确「无输出」 |
+| **测试** | 覆盖 sanitize、open-frame 安静化、session 展示路径与 slim JSON |
+
+升级：`npm i -g @zyluo/remote-ssh-mcp@0.2.2`（或在 MCP 配置中 bump 版本），然后**重启 MCP 进程**以加载新服务端。
+
+### 0.2.1
+
+- 修复 open frame 被 PTY 回显时 READY 标记解析失败
+
+### 0.2.0
+
+- 首次公开发布（npm / GitHub）
 
 ---
 

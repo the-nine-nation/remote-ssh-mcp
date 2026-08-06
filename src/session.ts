@@ -1,7 +1,7 @@
 import { randomBytes } from "node:crypto";
 import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
 import { once } from "node:events";
-import { HeadTailBuffer, latestLines } from "./output-buffer.js";
+import { HeadTailBuffer, presentOutput } from "./output-buffer.js";
 import {
   buildOpenFrame,
   buildRunFrame,
@@ -127,7 +127,7 @@ export class SshSession {
       "-e",
       "none",
       host,
-      "env PS1= PS2= PROMPT_COMMAND= HISTFILE=/dev/null bash --noprofile --norc",
+      "env PS1= PS2= PROMPT_COMMAND= HISTFILE=/dev/null TERM=dumb NO_COLOR=1 CLICOLOR=0 bash --noprofile --norc",
     ];
     const child = spawn(config.sshPath, args, {
       stdio: ["pipe", "pipe", "pipe"],
@@ -321,7 +321,6 @@ export class SshSession {
         cwd: this.#cwd,
         duration_ms: Date.now() - this.#active.startedAt,
         interrupted: this.#active.interruptReason !== undefined,
-        lines,
       };
     }
     return {
@@ -331,12 +330,11 @@ export class SshSession {
       last_exit: this.#lastExit,
       ...(this.#lastResult
         ? {
-            stdout: latestLines(this.#lastResult.stdout, lines),
-            stderr: latestLines(this.#lastResult.stderr, lines),
+            stdout: presentOutput(this.#lastResult.stdout, lines),
+            stderr: presentOutput(this.#lastResult.stderr, lines),
             truncated: this.#lastResult.truncated,
             stdout_truncated: this.#lastResult.stdout_truncated,
             stderr_truncated: this.#lastResult.stderr_truncated,
-            lines,
           }
         : {}),
     };
@@ -601,14 +599,8 @@ export class SshSession {
 
   #snapshot(active: ActiveCommand, lines?: number): OutputSnapshot {
     return {
-      stdout:
-        lines === undefined
-          ? active.stdout.toString()
-          : latestLines(active.stdout.toString(), lines),
-      stderr:
-        lines === undefined
-          ? active.stderr.toString()
-          : latestLines(active.stderr.toString(), lines),
+      stdout: presentOutput(active.stdout.toString(), lines),
+      stderr: presentOutput(active.stderr.toString(), lines),
       truncated: active.stdout.truncated || active.stderr.truncated,
       stdout_truncated: active.stdout.truncated,
       stderr_truncated: active.stderr.truncated,

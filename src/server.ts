@@ -10,7 +10,7 @@ export function buildServer(manager: SessionManager): McpServer {
   const server = new McpServer(
     {
       name: "remote-ssh-mcp",
-      version: "0.2.1",
+      version: "0.2.2",
     },
     {
       instructions: [
@@ -187,8 +187,37 @@ export function buildServer(manager: SessionManager): McpServer {
   return server;
 }
 
+/**
+ * Drop fields that cost tokens without helping the model:
+ * empty stderr, false truncation/flags, undefined values.
+ * stdout stays even when empty so "no output" remains explicit.
+ */
+export function slimToolPayload(
+  value: Record<string, unknown>,
+): Record<string, unknown> {
+  const out: Record<string, unknown> = {};
+  for (const [key, raw] of Object.entries(value)) {
+    if (raw === undefined) continue;
+    if (key === "stderr" && raw === "") continue;
+    if (key === "lines") continue; // echo of the request param
+    if (
+      (key === "truncated" ||
+        key === "stdout_truncated" ||
+        key === "stderr_truncated" ||
+        key === "interrupted" ||
+        key === "session_gone") &&
+      raw === false
+    ) {
+      continue;
+    }
+    out[key] = raw;
+  }
+  return out;
+}
+
 function toToolResult(value: Record<string, unknown>): CallToolResult {
-  const status = typeof value.status === "string" ? value.status : "unknown";
+  const slim = slimToolPayload(value);
+  const status = typeof slim.status === "string" ? slim.status : "unknown";
   const errorStatuses = new Set([
     "host_not_allowed",
     "connect_failed",
@@ -200,9 +229,12 @@ function toToolResult(value: Record<string, unknown>): CallToolResult {
     "busy",
     "nothing_to_interrupt",
   ]);
+  // content + structuredContent both carry the same slimmed object so hosts
+  // that only read one channel still work; slimming keeps the dual cost low.
+  const text = JSON.stringify(slim);
   return {
-    content: [{ type: "text", text: JSON.stringify(value) }],
-    structuredContent: value,
+    content: [{ type: "text", text }],
+    structuredContent: slim,
     isError: errorStatuses.has(status),
   };
 }
