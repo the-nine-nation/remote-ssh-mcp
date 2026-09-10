@@ -3,6 +3,7 @@ import { AuditLogger, commandAuditFields } from "./audit.js";
 import { checkDenylist } from "./denylist.js";
 import { SshSession } from "./session.js";
 import { reloadHostCatalog } from "./config.js";
+import { connectionHelp } from "./connection-help.js";
 import type { ServerConfig } from "./types.js";
 
 export class SessionManager {
@@ -136,6 +137,7 @@ export class SessionManager {
         status: "connect_failed",
         host,
         message,
+        ...connectionHelp(message),
       };
     } finally {
       if (openingSession) this.#openingSessions.delete(openingSession);

@@ -64,10 +64,10 @@ export async function discoverSshConfig(
     for (const originalLine of raw.split(/\r?\n/)) {
       const line = originalLine.trim();
       if (!line || line.startsWith("#")) continue;
-      const separator = line.search(/\s/);
-      if (separator < 0) continue;
-      const keyword = line.slice(0, separator).toLowerCase();
-      const value = stripTrailingComment(line.slice(separator).trim());
+      const directive = /^([^\s=]+)(?:\s*=\s*|\s+)(.*)$/.exec(line);
+      if (!directive) continue;
+      const keyword = directive[1]!.toLowerCase();
+      const value = stripTrailingComment(directive[2]!);
 
       if (keyword === "host") {
         currentExactAliases = [];

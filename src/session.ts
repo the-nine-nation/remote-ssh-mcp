@@ -1,6 +1,7 @@
 import { randomBytes } from "node:crypto";
 import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
 import { once } from "node:events";
+import { join, resolve } from "node:path";
 import { HeadTailBuffer, presentOutput } from "./output-buffer.js";
 import {
   buildOpenFrame,
@@ -101,6 +102,10 @@ export class SshSession {
     const token = randomToken();
     const privateDir = `/tmp/.sshmcp-${randomToken()}`;
     const args = [
+      // Preserve native system defaults unless a custom config was selected.
+      ...(resolve(config.sshConfigPath) === resolve(join(config.home, ".ssh", "config"))
+        ? []
+        : ["-F", config.sshConfigPath]),
       "-tt",
       "-o",
       "BatchMode=yes",
@@ -308,9 +313,18 @@ export class SshSession {
     this.#touch();
     if (this.#state === "closed") {
       return {
+        ...(this.#lastResult
+          ? {
+              ...this.#lastResult,
+              command_status: this.#lastResult.status,
+              stdout: presentOutput(this.#lastResult.stdout, lines),
+              stderr: presentOutput(this.#lastResult.stderr, lines),
+            }
+          : {}),
         id: this.id,
         status: "session_gone",
-        message: "unknown or closed session; call ssh_open again",
+        session_gone: true,
+        message: this.#lastResult?.message ?? "unknown or closed session; call ssh_open again",
       };
     }
     if (this.#active) {
@@ -330,6 +344,10 @@ export class SshSession {
       last_exit: this.#lastExit,
       ...(this.#lastResult
         ? {
+            command_status: this.#lastResult.status,
+            duration_ms: this.#lastResult.duration_ms,
+            ...(this.#lastResult.interrupted ? { interrupted: true } : {}),
+            ...(this.#lastResult.message ? { message: this.#lastResult.message } : {}),
             stdout: presentOutput(this.#lastResult.stdout, lines),
             stderr: presentOutput(this.#lastResult.stderr, lines),
             truncated: this.#lastResult.truncated,
@@ -549,6 +567,7 @@ export class SshSession {
   ): void {
     if (active.settled) return;
     active.settled = true;
+    this.#lastResult = result;
     if (active.timeoutTimer) clearTimeout(active.timeoutTimer);
     if (active.graceTimer) clearTimeout(active.graceTimer);
     if (this.#active === active) this.#active = undefined;

@@ -4,6 +4,20 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
 import { loadConfig, reloadHostCatalog } from "../src/config.js";
+import { discoverSshConfig } from "../src/ssh-config.js";
+
+test("SSH discovery accepts equals separators and quoted metadata", async () => {
+  const directory = await mkdtemp(join(tmpdir(), "sshmcp-equals-"));
+  const path = join(directory, "config");
+  await writeFile(path, 'Include=extra\nHost=prod\nHostName = prod.example.com\nUser=deploy\nPort =2222\nProxyJump=jump\n');
+  await writeFile(join(directory, "extra"), 'Host = "staging"\nHostName=staging.example.com\n');
+  const catalog = await discoverSshConfig(path, directory);
+  assert.deepEqual([...catalog.aliases].sort(), ["prod", "staging"]);
+  assert.deepEqual(catalog.entries.find((entry) => entry.alias === "prod"), {
+    alias: "prod", hostname: "prod.example.com", user: "deploy", port: 2222,
+    proxy_jump: "jump", sources: ["ssh_config"],
+  });
+});
 
 test("config discovers exact ssh aliases through Include and ignores patterns", async () => {
   const directory = await mkdtemp(join(tmpdir(), "sshmcp-config-"));

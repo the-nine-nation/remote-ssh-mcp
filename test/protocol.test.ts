@@ -57,6 +57,31 @@ test("RunFrameParser handles split markers and separates stderr", () => {
   assert.equal(stderr.toString(), "problem");
 });
 
+test("short progress output is visible before a command completes", () => {
+  const stdout = new HeadTailBuffer(1024, 128);
+  const parser = new RunFrameParser("token", stdout, new HeadTailBuffer(1024, 128));
+  parser.push(Buffer.from("ready"));
+  assert.equal(stdout.toString(), "ready");
+  parser.push(Buffer.from("\n__SSH"));
+  assert.equal(stdout.toString(), "ready");
+  parser.push(Buffer.from("ordinary output"));
+  assert.equal(stdout.toString(), "ready\n__SSHordinary output");
+});
+
+test("protocol markers survive every possible two-chunk split", () => {
+  const token = "0123456789abcdef0123456789abcdef";
+  const wire = Buffer.from(`ok\n__SSHMCP_EXIT:0:${token}:L3RtcA==__\n__SSHMCP_ERR_BEGIN:${token}__\nerr\n__SSHMCP_ERR_END:${token}__\n`);
+  for (let split = 1; split < wire.length; split++) {
+    const stdout = new HeadTailBuffer(1024, 128);
+    const stderr = new HeadTailBuffer(1024, 128);
+    const parser = new RunFrameParser(token, stdout, stderr);
+    parser.push(wire.subarray(0, split));
+    assert.deepEqual(parser.push(wire.subarray(split)), { exitCode: 0, cwd: "/tmp" });
+    assert.equal(stdout.toString(), "ok");
+    assert.equal(stderr.toString(), "err");
+  }
+});
+
 test("parseReadyMarker ignores banner bytes", () => {
   const token = "fedcba9876543210fedcba9876543210";
   const cwd = Buffer.from("/home/app").toString("base64");

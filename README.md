@@ -396,6 +396,14 @@ Remote commands can have irreversible side effects even when the MCP transport i
 
 ## Changelog
 
+### Unreleased — Connection and progress feedback
+
+- Custom `sshConfigPath` / `SSH_MCP_SSH_CONFIG` now controls the actual connection through OpenSSH `-F`, as well as host discovery. The default `~/.ssh/config` keeps native OpenSSH behavior; a custom file follows `-F` semantics (system-wide config is skipped).
+- Host discovery also accepts `Host=prod`, `HostName = example.com`, and `Include=...` syntax.
+- `ssh_open` failures include a `reason` and actionable `hint` for host trust, authentication, DNS, network, timeout, and local setup issues, alongside the original error.
+- Short progress output is delivered immediately unless its suffix could be a partial protocol marker.
+- Completed `ssh_peek` responses include `command_status` and `duration_ms`, keeping shell state (`idle`) separate from the command outcome. A peek already waiting when a session dies retains available output and timeout/interruption details. Later calls to the removed session still return `session_gone`.
+
 ### 0.2.2 — quieter remote output, fewer tokens
 
 PTY-backed interactive bash often injects escape sequences that look like “binary” when JSON-escaped (`\u001b[?2004h`, color CSI, cursor codes). That noise burned context on every `ssh_peek` / `ssh_run`.

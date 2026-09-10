@@ -394,6 +394,14 @@ npm audit --omit=dev
 
 ## 更新日志
 
+### 未发布 — 连接与进度反馈优化
+
+- 自定义 `sshConfigPath` / `SSH_MCP_SSH_CONFIG` 现在同时用于主机发现和实际连接，通过 OpenSSH `-F` 传入。默认 `~/.ssh/config` 保留原生行为；自定义文件遵循 `-F` 语义，不再读取系统级配置。
+- 主机发现兼容 `Host=prod`、`HostName = example.com` 和 `Include=...` 写法。
+- `ssh_open` 失败时在原始错误之外返回 `reason` 和 `hint`，提供主机信任、认证、DNS、网络、超时和本机配置的排查方向。
+- 短进度输出及时显示，仅在末尾可能是未接收完整的协议标记时暂存相关字节。
+- 已完成命令的 `ssh_peek` 增加 `command_status` 和 `duration_ms`，区分 shell 空闲与命令执行结果。正在等待的 peek 遇到会话关闭时，保留已收到的输出及超时／中断原因；会话移除后的新调用仍返回 `session_gone`。
+
 ### 0.2.2 — 更安静的远端输出，更少 token
 
 PTY + 交互式 bash 常注入转义序列；经 JSON 转义后像「二进制」（`\u001b[?2004h`、颜色 CSI、光标码等），每次 `ssh_peek` / `ssh_run` 都在浪费上下文。

@@ -85,7 +85,7 @@ export class RunFrameParser {
       if (this.#stage === "stdout") {
         const index = this.#pending.indexOf(this.#exitPrefix);
         if (index < 0) {
-          this.#flushSafe(this.#stdout, this.#exitPrefix.length - 1);
+          this.#flushSafe(this.#stdout, this.#exitPrefix);
           return undefined;
         }
         this.#stdout.append(this.#pending.subarray(0, index));
@@ -119,7 +119,7 @@ export class RunFrameParser {
       if (this.#stage === "err_begin") {
         const index = this.#pending.indexOf(this.#errBegin);
         if (index < 0) {
-          this.#flushSafe(this.#stdout, this.#errBegin.length - 1);
+          this.#flushSafe(this.#stdout, this.#errBegin);
           return undefined;
         }
         this.#stdout.append(this.#pending.subarray(0, index));
@@ -131,7 +131,7 @@ export class RunFrameParser {
       if (this.#stage === "stderr") {
         const index = this.#pending.indexOf(this.#errEnd);
         if (index < 0) {
-          this.#flushSafe(this.#stderr, this.#errEnd.length - 1);
+          this.#flushSafe(this.#stderr, this.#errEnd);
           return undefined;
         }
         this.#stderr.append(this.#pending.subarray(0, index));
@@ -144,8 +144,14 @@ export class RunFrameParser {
     }
   }
 
-  #flushSafe(target: HeadTailBuffer, keepBytes: number): void {
-    if (this.#pending.length <= keepBytes) return;
+  #flushSafe(target: HeadTailBuffer, marker: Buffer): void {
+    // Retain only a suffix that could actually be a split protocol marker.
+    // Keeping marker.length bytes unconditionally hides short progress output.
+    let keepBytes = Math.min(this.#pending.length, marker.length - 1);
+    while (keepBytes > 0) {
+      if (this.#pending.subarray(-keepBytes).equals(marker.subarray(0, keepBytes))) break;
+      keepBytes -= 1;
+    }
     const flushLength = this.#pending.length - keepBytes;
     target.append(this.#pending.subarray(0, flushLength));
     this.#pending = this.#pending.subarray(flushLength);

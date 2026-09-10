@@ -5,6 +5,7 @@ import { join, resolve } from "node:path";
 import test from "node:test";
 import { SessionManager } from "../src/session-manager.js";
 import type { ServerConfig } from "../src/types.js";
+import { shellSingleQuote } from "../src/protocol.js";
 
 const fakeSsh = resolve("test/fake-ssh.sh");
 const fakeHangingSsh = resolve("test/fake-ssh-hang.sh");
@@ -170,6 +171,62 @@ test("wait expiry returns running while the command continues", async (t) => {
   assert.equal(completed.status, "idle");
   assert.equal(completed.last_exit, 0);
   assert.equal(completed.stdout, "finished");
+  assert.equal(completed.command_status, "ok");
+  assert.equal(typeof completed.duration_ms, "number");
+});
+
+test("custom SSH config is passed as a single argument to the connection process", async (t) => {
+  const directory = await mkdtemp(join(tmpdir(), "sshmcp-args-"));
+  const argsPath = join(directory, "args");
+  const sshPath = join(directory, "ssh");
+  const sshConfigPath = join(directory, "config with spaces");
+  await writeFile(sshPath, `#!/bin/sh\nprintf '%s\\n' "$@" > ${shellSingleQuote(argsPath)}\nexec ${shellSingleQuote(fakeSsh)}\n`);
+  await chmod(sshPath, 0o755);
+  const { manager } = await fixture({ sshPath, sshConfigPath });
+  t.after(() => manager.closeAll());
+  assert.equal((await manager.open("test")).status, "idle");
+  const args = (await readFile(argsPath, "utf8")).split("\n");
+  assert.deepEqual(args.slice(0, 2), ["-F", sshConfigPath]);
+  assert.ok(args.includes("BatchMode=yes"));
+  assert.ok(args.includes("StrictHostKeyChecking=yes"));
+});
+
+test("a waiting peek retains timeout diagnostics when the session is lost", async (t) => {
+  const { manager } = await fixture();
+  t.after(() => manager.closeAll());
+  const opened = await manager.open("test");
+  const id = opened.id as string;
+  assert.equal((await manager.run(id, "printf before-timeout; sleep 2", 0.15, 0)).status, "running");
+  const completed = await manager.peek(id, 50, 1);
+  assert.equal(completed.status, "session_gone");
+  assert.equal(completed.command_status, "timeout");
+  assert.equal(completed.session_gone, true);
+  assert.equal(completed.interrupted, true);
+  assert.equal(completed.stdout, "before-timeout");
+  assert.match(String(completed.message), /grace period/);
+});
+
+test("peek reports a failed command separately from the idle shell state", async (t) => {
+  const { manager } = await fixture();
+  t.after(() => manager.closeAll());
+  const opened = await manager.open("test");
+  const id = opened.id as string;
+  await manager.run(id, "sleep 0.05; printf failed >&2; false", undefined, 0);
+  const completed = await manager.peek(id, 50, 1);
+  assert.equal(completed.status, "idle");
+  assert.equal(completed.command_status, "command_failed");
+  assert.equal(completed.last_exit, 1);
+  assert.equal(completed.stderr, "failed");
+});
+
+test("missing SSH executable returns actionable connection guidance", async (t) => {
+  const { manager } = await fixture({ sshPath: "/definitely/not/an/ssh-client" });
+  t.after(() => manager.closeAll());
+  const result = await manager.open("test");
+  assert.equal(result.status, "connect_failed");
+  assert.equal(result.reason, "ssh_not_found");
+  assert.match(String(result.hint), /SSH_MCP_SSH_PATH/);
+  assert.equal(manager.list().connection_count, 0);
 });
 
 test("peek wait_sec long-polls until the command finishes", async (t) => {
